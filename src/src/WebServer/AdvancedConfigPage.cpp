@@ -18,7 +18,7 @@
 
 #ifdef WEBSERVER_ADVANCED
 
-void setLogLevelFor(byte destination, LabelType::Enum label) {
+void setLogLevelFor(uint8_t destination, LabelType::Enum label) {
   setLogLevelFor(destination, getFormItemInt(getInternalLabel(label)));
 }
 
@@ -62,7 +62,10 @@ void handle_advanced() {
 #endif // ifdef FEATURE_SD
     Settings.UseValueLogger              = isFormItemChecked(F("valuelogger"));
     Settings.BaudRate                    = getFormItemInt(F("baudrate"));
-    Settings.UseNTP                      = isFormItemChecked(F("usentp"));
+    Settings.UseNTP(isFormItemChecked(F("usentp")));
+    Settings.ExtTimeSource(
+      static_cast<ExtTimeSource_e>(getFormItemInt(F("exttimesource")))
+    );
     Settings.DST                         = isFormItemChecked(F("dst"));
     Settings.WDI2CAddress                = getFormItemInt(F("wdi2caddress"));
     #ifdef USES_SSDP
@@ -96,8 +99,11 @@ void handle_advanced() {
     Settings.WiFi_sensitivity_margin = getFormItemInt(LabelType::WIFI_SENS_MARGIN);
     Settings.UseMaxTXpowerForSending(isFormItemChecked(LabelType::WIFI_SEND_AT_MAX_TX_PWR));
     Settings.NumberExtraWiFiScans = getFormItemInt(LabelType::WIFI_NR_EXTRA_SCANS);
-    Settings.PeriodicalScanWiFi(isFormItemChecked(LabelType::WIFI_PERIODICAL_SCAN));
-    Settings.JSONBoolWithoutQuotes(isFormItemChecked(F("json_bool_with_quotes")));
+    Settings.UseLastWiFiFromRTC(isFormItemChecked(LabelType::WIFI_USE_LAST_CONN_FROM_RTC));
+    Settings.JSONBoolWithoutQuotes(isFormItemChecked(LabelType::JSON_BOOL_QUOTES));
+    Settings.EnableTimingStats(isFormItemChecked(LabelType::ENABLE_TIMING_STATISTICS));
+    Settings.AllowTaskValueSetAllPlugins(isFormItemChecked(LabelType::TASKVALUESET_ALL_PLUGINS));
+    Settings.EnableClearHangingI2Cbus(isFormItemChecked(LabelType::ENABLE_CLEAR_HUNG_I2C_BUS));
     #ifdef ESP8266
     Settings.UseAlternativeDeepSleep(isFormItemChecked(LabelType::DEEP_SLEEP_ALTERNATIVE_CALL));
     #endif
@@ -136,10 +142,11 @@ void handle_advanced() {
   addFormCheckBox(F("MQTT change ClientId at reconnect"), F("uniquemqttclientidreconnect"), Settings.uniqueMQTTclientIdReconnect_unused());
 */
 
-  addFormSubHeader(F("NTP Settings"));
+  addFormSubHeader(F("Time Source"));
 
-  addFormCheckBox(F("Use NTP"), F("usentp"), Settings.UseNTP);
+  addFormCheckBox(F("Use NTP"), F("usentp"), Settings.UseNTP());
   addFormTextBox(F("NTP Hostname"), F("ntphost"), Settings.NTPHost, 63);
+  addFormExtTimeSourceSelect(F("External Time Source"), F("exttimesource"), Settings.ExtTimeSource());
 
   addFormSubHeader(F("DST Settings"));
   addFormDstSelect(true,  Settings.DST_Start);
@@ -194,6 +201,12 @@ void handle_advanced() {
   addHtml(F(" (decimal)"));
 
   addFormNumericBox(F("I2C ClockStretchLimit"), F("wireclockstretchlimit"), Settings.WireClockStretchLimit); // TODO define limits
+  #ifdef ESP8266
+  addUnit(F("usec"));
+  #endif
+  #ifdef ESP32
+  addUnit(F("1/80 usec"));
+  #endif
   #if defined(FEATURE_ARDUINO_OTA)
   addFormCheckBox(F("Enable Arduino OTA"), F("arduinootaenable"), Settings.ArduinoOTAEnable);
   #endif // if defined(FEATURE_ARDUINO_OTA)
@@ -201,7 +214,13 @@ void handle_advanced() {
   addFormCheckBox_disabled(F("Enable RTOS Multitasking"), F("usertosmultitasking"), Settings.UseRTOSMultitasking);
   #endif // if defined(ESP32)
 
-  addFormCheckBox(F("JSON bool output without quotes"), F("json_bool_with_quotes"), Settings.JSONBoolWithoutQuotes());
+  addFormCheckBox(LabelType::JSON_BOOL_QUOTES, Settings.JSONBoolWithoutQuotes());
+  #ifdef USES_TIMING_STATS
+  addFormCheckBox(LabelType::ENABLE_TIMING_STATISTICS, Settings.EnableTimingStats());
+  #endif
+  addFormCheckBox(LabelType::TASKVALUESET_ALL_PLUGINS, Settings.AllowTaskValueSetAllPlugins());
+  addFormCheckBox(LabelType::ENABLE_CLEAR_HUNG_I2C_BUS, Settings.EnableClearHangingI2Cbus());
+
   #ifdef ESP8266
   addFormCheckBox(LabelType::DEEP_SLEEP_ALTERNATIVE_CALL, Settings.UseAlternativeDeepSleep());
   #endif
@@ -255,7 +274,7 @@ void handle_advanced() {
     String note = F("Number of extra times to scan all channels to have higher chance of finding the desired AP");
     addFormNote(note);
   }
-  addFormCheckBox(LabelType::WIFI_PERIODICAL_SCAN, Settings.PeriodicalScanWiFi());
+  addFormCheckBox(LabelType::WIFI_USE_LAST_CONN_FROM_RTC, Settings.UseLastWiFiFromRTC());
 
 
 
@@ -314,6 +333,23 @@ void addFormDstSelect(bool isStart, uint16_t choice) {
     addUnit(isStart ? F("hour &#x21b7;") : F("hour &#x21b6;"));
   }
 }
+
+void addFormExtTimeSourceSelect(const __FlashStringHelper * label, const __FlashStringHelper * id, ExtTimeSource_e choice)
+{
+  addRowLabel(label);
+  const __FlashStringHelper * options[5] =
+    { F("None"), F("DS1307"), F("DS3231"), F("PCF8523"), F("PCF8563")};
+  int optionValues[5] = { 
+    static_cast<int>(ExtTimeSource_e::None),
+    static_cast<int>(ExtTimeSource_e::DS1307),
+    static_cast<int>(ExtTimeSource_e::DS3231),
+    static_cast<int>(ExtTimeSource_e::PCF8523),
+    static_cast<int>(ExtTimeSource_e::PCF8563)
+    };
+
+  addSelector(id, 5, options, optionValues, NULL, static_cast<int>(choice));
+}
+
 
 void addFormLogLevelSelect(LabelType::Enum label, int choice)
 {

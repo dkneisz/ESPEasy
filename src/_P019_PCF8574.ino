@@ -51,11 +51,9 @@
 #define PLUGIN_019_LONGPRESS_HIGH 2
 #define PLUGIN_019_LONGPRESS_BOTH 3
 
-boolean Plugin_019(byte function, struct EventStruct *event, String& string)
+boolean Plugin_019(uint8_t function, struct EventStruct *event, String& string)
 {
   boolean success = false;
-
-  // static int8_t switchstate[TASKS_MAX];
 
   switch (function)
   {
@@ -64,7 +62,7 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
       Device[++deviceCount].Number           = PLUGIN_ID_019;
       Device[deviceCount].Type               = DEVICE_TYPE_I2C;
       Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SWITCH;
-      Device[deviceCount].Ports              = 8;
+      Device[deviceCount].Ports              = 0;
       Device[deviceCount].PullUpOption       = false;
       Device[deviceCount].InverseLogicOption = true;
       Device[deviceCount].FormulaOption      = false;
@@ -85,6 +83,33 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
     case PLUGIN_GET_DEVICEVALUENAMES:
     {
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_019));
+      break;
+    }
+
+    case PLUGIN_I2C_HAS_ADDRESS:
+    case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
+    {
+      const uint8_t i2cAddressValues[] = { 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f };
+      if (function == PLUGIN_WEBFORM_SHOW_I2C_PARAMS) {
+        String  portNames[8];
+        int     portValues[8];
+        uint8_t unit    = (CONFIG_PORT - 1) / 8;
+        uint8_t port    = CONFIG_PORT - (unit * 8);
+        uint8_t address = 0x20 + unit;
+
+        if (unit > 7) { address += 0x10; }
+
+        for (uint8_t x = 0; x < 8; x++) {
+          portValues[x] = x + 1;
+          portNames[x]  = 'P';
+          portNames[x] += x;
+        }
+        addFormSelectorI2C(F("plugin_019_i2c"), 16, i2cAddressValues, address);
+        addFormSelector(F("Port"), F("plugin_019_port"), 8, portNames, portValues, port);
+        addFormNote(F("PCF8574 uses addresses 0x20..0x27, PCF8574<b>A</b> uses addresses 0x38..0x3F."));
+      } else {
+        success = intArrayContains(16, i2cAddressValues, event->Par1);
+      }
       break;
     }
 
@@ -111,7 +136,7 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
       }
 
       {
-        byte   choiceDC = PCONFIG(4);
+        uint8_t   choiceDC = PCONFIG(4);
         const __FlashStringHelper * buttonDC[4];
         buttonDC[0] = F("Disabled");
         buttonDC[1] = F("Active only on LOW (EVENT=3)");
@@ -133,7 +158,7 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
       }
 
       {
-        byte   choiceLP = PCONFIG(5);
+        uint8_t   choiceLP = PCONFIG(5);
         const __FlashStringHelper * buttonLP[4];
         buttonLP[0] = F("Disabled");
         buttonLP[1] = F("Active only on LOW (EVENT= 10 [NORMAL] or 11 [INVERSED])");
@@ -158,6 +183,13 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_SAVE:
     {
+      uint8_t i2c  = getFormItemInt(F("plugin_019_i2c"));
+
+      if (i2c > 0x27) { i2c -= 0x10; }
+
+      uint8_t port = getFormItemInt(F("plugin_019_port"));
+      CONFIG_PORT = (((i2c - 0x20) << 3) + port);
+
       PCONFIG(0) = isFormItemChecked(F("p019_boot"));
 
       // @giig1967-20181022
@@ -349,6 +381,10 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
           // Reset SafeButton counter
           PCONFIG_LONG(3) = 0;
 
+          // @giig1967g-20210804: reset timer for long press
+          PCONFIG_LONG(2) = millis();
+          PCONFIG(6)      = false;
+
           const unsigned long debounceTime = timePassedSince(PCONFIG_LONG(0));
 
           if (debounceTime >= (unsigned long)lround(PCONFIG_FLOAT(0))) // de-bounce check
@@ -384,7 +420,7 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
             }
             currentStatus.state = state;
 
-            byte output_value;
+            uint8_t output_value;
 
             // boolean sendState = switchstate[event->TaskIndex];
             boolean sendState = currentStatus.state;
@@ -453,7 +489,7 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
 
           if (deltaLP >= (unsigned long)lround(PCONFIG_FLOAT(2)))
           {
-            byte output_value;
+            uint8_t output_value;
             PCONFIG(6) = true; // fired = true
 
             boolean sendState = state;
@@ -486,7 +522,7 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
           }
         } else {
           if (PCONFIG_LONG(3) == 1) { // Safe Button detected. Send EVENT value = 4
-            const byte SAFE_BUTTON_EVENT = 4;
+            const uint8_t SAFE_BUTTON_EVENT = 4;
 
             // Reset SafeButton counter
             PCONFIG_LONG(3) = 0;
@@ -502,8 +538,8 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
               log += tempUserVar;
               addLog(LOG_LEVEL_INFO, log);
             }
-            // send task event
-            sendData(event);
+            // send task event: DO NOT SEND TASK EVENT
+            //sendData(event);
             // send monitor event
             if (currentStatus.monitor) sendMonitorEvent(monitorEventString.c_str(), CONFIG_PORT, SAFE_BUTTON_EVENT);
 
@@ -630,11 +666,11 @@ boolean Plugin_019(byte function, struct EventStruct *event, String& string)
 // PCF8574 read
 // ********************************************************************************
 // @giig1967g-20181023: changed to int8_t
-int8_t Plugin_019_Read(byte Par1)
+int8_t Plugin_019_Read(uint8_t Par1)
 {
   int8_t state    = -1;
-  byte unit       = (Par1 - 1) / 8;
-  byte port       = Par1 - (unit * 8);
+  uint8_t unit       = (Par1 - 1) / 8;
+  uint8_t port       = Par1 - (unit * 8);
   uint8_t address = 0x20 + unit;
 
   if (unit > 7) { address += 0x10; }
@@ -665,7 +701,7 @@ uint8_t Plugin_019_ReadAllPins(uint8_t address)
 // ********************************************************************************
 // PCF8574 write
 // ********************************************************************************
-boolean Plugin_019_Write(byte Par1, byte Par2)
+boolean Plugin_019_Write(uint8_t Par1, uint8_t Par2)
 {
   uint8_t unit    = (Par1 - 1) / 8;
   uint8_t port    = Par1 - (unit * 8);

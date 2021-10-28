@@ -25,7 +25,9 @@ public:
 
   C015_queue_element(C015_queue_element&& other);
 
-  C015_queue_element(const struct EventStruct *event, byte value_count);
+  C015_queue_element(const struct EventStruct *event, uint8_t value_count);
+
+  C015_queue_element& operator=(C015_queue_element&& other);
 
   bool   checkDone(bool succesfull) const;
 
@@ -41,8 +43,8 @@ public:
   unsigned long _timestamp         = millis();
   taskIndex_t TaskIndex            = INVALID_TASK_INDEX;
   controllerIndex_t controller_idx = INVALID_CONTROLLER_INDEX;
-  mutable byte valuesSent          = 0; // Value must be set by const function checkDone()
-  byte valueCount                  = 0;
+  mutable uint8_t valuesSent          = 0; // Value must be set by const function checkDone()
+  uint8_t valueCount                  = 0;
 };
 
 #endif //USES_C015

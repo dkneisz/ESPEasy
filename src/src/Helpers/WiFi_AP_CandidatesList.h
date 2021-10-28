@@ -26,6 +26,11 @@ struct WiFi_AP_CandidatesList {
 
   // Add found WiFi access points to the list if they are possible candidates.
   void process_WiFiscan(uint8_t scancount);
+#ifdef ESP8266
+  void process_WiFiscan(const bss_info& ap);
+#endif
+
+  void after_process_WiFiscan();
 
   // Get the next candidate to connect
   // Return true when a valid next candidate was found.
@@ -53,6 +58,8 @@ struct WiFi_AP_CandidatesList {
 
   static bool SettingsIndexMatchCustomCredentials(uint8_t index);
 
+  static bool SettingsIndexMatchEmergencyFallback(uint8_t index);
+
 private:
 
   // Pick the possible 
@@ -63,7 +70,7 @@ private:
   void purge_unusable();
 
   // Load SSID and pass/key from the settings.
-  bool get_SSID_key(byte    index,
+  bool get_SSID_key(uint8_t    index,
                     String& ssid,
                     String& key) const;
 

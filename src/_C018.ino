@@ -114,7 +114,7 @@ struct C018_data_struct {
     return myLora->command_finished();
   }
 
-  bool txUncnfBytes(const byte *data, uint8_t size, uint8_t port) {
+  bool txUncnfBytes(const uint8_t *data, uint8_t size, uint8_t port) {
     bool res = myLora->txBytes(data, size, port) != RN2xx3_datatypes::TX_return_type::TX_FAIL;
 
     C018_logError(F("txUncnfBytes()"));
@@ -307,7 +307,7 @@ struct C018_data_struct {
 
       if (rn2xx3_handler::RN_state::must_perform_init == state) {
         if (myLora->get_busy_count() > 10) {
-          if (_resetPin != -1) {
+          if (validGpio(_resetPin)) {
             pinMode(_resetPin, OUTPUT);
             digitalWrite(_resetPin, LOW);
             delay(50);
@@ -356,12 +356,14 @@ private:
   }
 
   void triggerAutobaud() {
-    if ((C018_easySerial == nullptr) || (myLora == nullptr)) {}
+    if ((C018_easySerial == nullptr) || (myLora == nullptr)) {
+      return;
+    }
     int retries = 2;
 
     while (retries > 0 && !autobaud_success) {
       if (retries == 1) {
-        if (_resetPin != -1) {
+        if (validGpio(_resetPin)) {
           pinMode(_resetPin, OUTPUT);
           digitalWrite(_resetPin, LOW);
           delay(50);
@@ -572,7 +574,7 @@ bool CPlugin_018(CPlugin::Function function, struct EventStruct *event, String& 
         if (!customConfig) {
           break;
         }
-        LoadCustomControllerSettings(event->ControllerIndex, (byte *)customConfig.get(), sizeof(C018_ConfigStruct));
+        LoadCustomControllerSettings(event->ControllerIndex, reinterpret_cast<uint8_t *>(customConfig.get()), sizeof(C018_ConfigStruct));
         customConfig->validate();
         baudrate      = customConfig->baudrate;
         rxpin         = customConfig->rxpin;
@@ -637,19 +639,21 @@ bool CPlugin_018(CPlugin::Function function, struct EventStruct *event, String& 
 
       addTableSeparator(F("Serial Port Configuration"), 2, 3);
 
-      // Optional reset pin RN2xx3
-      addFormPinSelect(PinSelectPurpose::Generic_output, formatGpioName_output_optional(F("Reset")), F("taskdevicepin3"), resetpin);
+      // FIXME TD-er: Add port selector
+      serialHelper_webformLoad(ESPEasySerialPort::not_set, rxpin, txpin, true);
 
       // Show serial port selection
       addFormPinSelect(PinSelectPurpose::Generic_input, formatGpioName_RX(false),                   F("taskdevicepin1"), rxpin);
       addFormPinSelect(PinSelectPurpose::Generic_output, formatGpioName_TX(false),                   F("taskdevicepin2"), txpin);
 
-      // FIXME TD-er: Add port selector
-      serialHelper_webformLoad(ESPEasySerialPort::not_set, rxpin, txpin, true);
+      html_add_script(F("document.getElementById('serPort').onchange();"), false);
 
       addFormNumericBox(F("Baudrate"), F(C018_BAUDRATE_LABEL), baudrate, 2400, 115200);
       addUnit(F("baud"));
       addFormNote(F("Module default baudrate: 57600 bps"));
+
+      // Optional reset pin RN2xx3
+      addFormPinSelect(PinSelectPurpose::Generic_output, formatGpioName_output_optional(F("Reset")), F("taskdevicepin3"), resetpin);
 
       addTableSeparator(F("Device Status"), 2, 3);
 
@@ -661,7 +665,7 @@ bool CPlugin_018(CPlugin::Function function, struct EventStruct *event, String& 
         addHtml(C018_data->sysver());
 
         addRowLabel(F("Voltage"));
-        addHtml(String(static_cast<float>(C018_data->getVbat()) / 1000.0, 3));
+        addHtml(String(static_cast<float>(C018_data->getVbat()) / 1000.0f, 3));
 
         addRowLabel(F("Dev Addr"));
         addHtml(C018_data->getDevaddr());
@@ -727,7 +731,7 @@ bool CPlugin_018(CPlugin::Function function, struct EventStruct *event, String& 
         customConfig->stackVersion  = getFormItemInt(F("ttnstack"), customConfig->stackVersion);
         customConfig->adr           = isFormItemChecked(F("adr"));
         serialHelper_webformSave(customConfig->serialPort, customConfig->rxpin, customConfig->txpin);
-        SaveCustomControllerSettings(event->ControllerIndex, (byte *)customConfig.get(), sizeof(C018_ConfigStruct));
+        SaveCustomControllerSettings(event->ControllerIndex, reinterpret_cast<const uint8_t *>(customConfig.get()), sizeof(C018_ConfigStruct));
       }
       break;
     }
@@ -833,7 +837,7 @@ bool C018_init(struct EventStruct *event) {
   }
   {
     // Allocate ControllerSettings object in a scope, so we can destruct it as soon as possible.
-    MakeControllerSettings(ControllerSettings);
+    MakeControllerSettings(ControllerSettings); //-V522
 
     if (!AllocatedControllerSettings()) {
       return false;
@@ -852,7 +856,7 @@ bool C018_init(struct EventStruct *event) {
   if (!customConfig) {
     return false;
   }
-  LoadCustomControllerSettings(event->ControllerIndex, (byte *)customConfig.get(), sizeof(C018_ConfigStruct));
+  LoadCustomControllerSettings(event->ControllerIndex, reinterpret_cast<uint8_t *>(customConfig.get()), sizeof(C018_ConfigStruct));
   customConfig->validate();
 
   if (!C018_data->init(customConfig->serialPort, customConfig->rxpin, customConfig->txpin, customConfig->baudrate,
@@ -896,7 +900,7 @@ bool C018_init(struct EventStruct *event) {
     return false;
   }
 
-  if (!C018_data->txUncnf("ESPeasy (TTN)", Port)) {
+  if (!C018_data->txUncnf(F("ESPeasy (TTN)"), Port)) {
     return false;
   }
   return true;
@@ -919,7 +923,7 @@ bool do_process_c018_delay_queue(int controller_number, const C018_queue_element
     success = C018_data->txHexBytes(element.packed, ControllerSettings.Port);
 
     if (success) {
-      if (airtime_ms > 0.0) {
+      if (airtime_ms > 0.0f) {
         ADD_TIMER_STAT(C018_AIR_TIME, static_cast<unsigned long>(airtime_ms * 1000));
 
         if (loglevelActiveFor(LOG_LEVEL_INFO)) {

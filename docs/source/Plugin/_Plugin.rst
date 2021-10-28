@@ -19,7 +19,7 @@ There are different released versions of ESP Easy:
 
 .. comment :red:`DEVELOPMENT` is used for plugins that are still being developed and are not considered stable at all.
 
-:yellow:`ENERGY` :yellow:`DISPLAY` are specialized builds holding all Energy- and Display- related plugins.
+:yellow:`ENERGY` :yellow:`DISPLAY` :yellow:`IR` :yellow:`IRext` are specialized builds holding all Energy-, Display- and Infra Red- (extended) related plugins.
 
 :yellow:`MAX` is the build that has all plugins that are available in the ESPEasy repository. Only available for ESP32 16MB Flash units.
 
@@ -134,6 +134,7 @@ There are different released versions of ESP Easy:
    ":ref:`P106_page`","|P106_status|","P106"
    ":ref:`P107_page`","|P107_status|","P107"
    ":ref:`P108_page`","|P108_status|","P108"
+   ":ref:`P109_page`","|P109_status|","P109"
    ":ref:`P110_page`","|P110_status|","P110"
    ":ref:`P111_page`","|P111_status|","P111"
    ":ref:`P113_page`","|P113_status|","P113"

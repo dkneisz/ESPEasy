@@ -32,14 +32,24 @@
 # define CPLUGIN_015_RECONNECT_INTERVAL 60000
 
 # ifdef CPLUGIN_015_SSL
+  #ifdef ESP8266
   #  include <BlynkSimpleEsp8266_SSL.h>
+  #endif
+  #ifdef ESP32
+  #  include <BlynkSimpleEsp32_SSL.h>
+  #endif
   #  define CPLUGIN_NAME_015       "Blynk SSL [TESTING]"
 
 // Current official blynk server thumbprint
   #  define CPLUGIN_015_DEFAULT_THUMBPRINT "FD C0 7D 8D 47 97 F7 E3 07 05 D3 4E E3 BB 8E 3D C0 EA BE 1C"
   #  define C015_LOG_PREFIX "BL (ssl): "
 # else // ifdef CPLUGIN_015_SSL
+ #ifdef ESP8266
  #  include <BlynkSimpleEsp8266.h>
+ #endif
+ #ifdef ESP32
+ #  include <BlynkSimpleEsp32.h>
+ #endif
  #  define CPLUGIN_NAME_015       "Blynk [TESTING]"
  #  define C015_LOG_PREFIX "BL: "
 # endif // ifdef CPLUGIN_015_SSL
@@ -106,8 +116,8 @@ bool CPlugin_015(CPlugin::Function function, struct EventStruct *event, String& 
     # ifdef CPLUGIN_015_SSL
     case CPlugin::Function::CPLUGIN_WEBFORM_LOAD:
     {
-      char thumbprint[60];
-      LoadCustomControllerSettings(event->ControllerIndex, (byte *)&thumbprint, sizeof(thumbprint));
+      char thumbprint[60] = {0};
+      LoadCustomControllerSettings(event->ControllerIndex, reinterpret_cast<const uint8_t *>(&thumbprint), sizeof(thumbprint));
 
       if (strlen(thumbprint) != 59) {
         strcpy(thumbprint, CPLUGIN_015_DEFAULT_THUMBPRINT);
@@ -142,13 +152,13 @@ bool CPlugin_015(CPlugin::Function function, struct EventStruct *event, String& 
         _C015_LastConnectAttempt[event->ControllerIndex] = 0;
 
           # ifdef CPLUGIN_015_SSL
-        char   thumbprint[60];
+        char   thumbprint[60] = {0};
         String error = F("Specify server thumbprint with exactly 59 symbols string like " CPLUGIN_015_DEFAULT_THUMBPRINT);
 
         if (!safe_strncpy(thumbprint, webArg("c015_thumbprint"), 60) || (strlen(thumbprint) != 59)) {
           addHtmlError(error);
         }
-        SaveCustomControllerSettings(event->ControllerIndex, (byte *)&thumbprint, sizeof(thumbprint));
+        SaveCustomControllerSettings(event->ControllerIndex, reinterpret_cast<const uint8_t *>(&thumbprint), sizeof(thumbprint));
           # endif // ifdef CPLUGIN_015_SSL
       }
       break;
@@ -165,7 +175,7 @@ bool CPlugin_015(CPlugin::Function function, struct EventStruct *event, String& 
       }
 
       // Collect the values at the same run, to make sure all are from the same sample
-      byte valueCount = getValueCountForTask(event->TaskIndex);
+      uint8_t valueCount = getValueCountForTask(event->TaskIndex);
 
       
       success = C015_DelayHandler->addToQueue(C015_queue_element(event, valueCount));
@@ -177,7 +187,7 @@ bool CPlugin_015(CPlugin::Function function, struct EventStruct *event, String& 
         C015_queue_element& element = C015_DelayHandler->sendQueue.back();
         LoadTaskSettings(event->TaskIndex);
 
-        for (byte x = 0; x < valueCount; x++)
+        for (uint8_t x = 0; x < valueCount; x++)
         {
           bool   isvalid;
           String formattedValue = formatUserVar(event, x, isvalid);
@@ -286,8 +296,8 @@ boolean Blynk_keep_connection_c015(int controllerIndex, ControllerSettingsStruct
     _C015_LastConnectAttempt[controllerIndex] = millis();
 
     # ifdef CPLUGIN_015_SSL
-    char thumbprint[60];
-    LoadCustomControllerSettings(controllerIndex, (byte *)&thumbprint, sizeof(thumbprint));
+    char thumbprint[60] = {0};
+    LoadCustomControllerSettings(controllerIndex, reinterpret_cast<uint8_t *>(&thumbprint), sizeof(thumbprint));
 
     if (strlen(thumbprint) != 59) {
       if (loglevelActiveFor(LOG_LEVEL_INFO)) {
@@ -425,7 +435,7 @@ boolean Blynk_send_c015(const String& value, int vPin, unsigned int clientTimeou
 
 // This is called for all virtual pins, that don't have BLYNK_WRITE handler
 BLYNK_WRITE_DEFAULT() {
-  byte  vPin     = request.pin;
+  uint8_t  vPin     = request.pin;
   float pinValue = param.asFloat();
 
   if (loglevelActiveFor(LOG_LEVEL_INFO)) {

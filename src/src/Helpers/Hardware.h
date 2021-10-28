@@ -24,7 +24,12 @@ void hardwareInit();
 
 void initI2C();
 
-void I2CSelectClockSpeed(bool setLowSpeed);
+void I2CSelectHighClockSpeed();
+void I2CSelectLowClockSpeed();
+void I2CSelect_Max100kHz_ClockSpeed();
+void I2CSelectClockSpeed(uint32_t clockFreq);
+void I2CForceResetBus_swap_pins(uint8_t address);
+void I2CBegin(int8_t sda, int8_t scl, uint32_t clockFreq);
 
 #ifdef FEATURE_I2CMULTIPLEXER
 bool isI2CMultiplexerEnabled();
@@ -34,9 +39,9 @@ void I2CMultiplexerSelect(uint8_t i);
 
 void I2CMultiplexerOff();
 
-void SetI2CMultiplexer(byte toWrite);
+void SetI2CMultiplexer(uint8_t toWrite);
 
-byte I2CMultiplexerMaxChannels();
+uint8_t I2CMultiplexerMaxChannels();
 
 void I2CMultiplexerReset();
 
@@ -101,7 +106,7 @@ void addSwitchPlugin(taskIndex_t taskIndex, int gpio, const String& name, bool a
 
 void addPredefinedPlugins(const GpioFactorySettingsStruct& gpio_settings);
 
-void addButtonRelayRule(byte buttonNumber, int relay_gpio);
+void addButtonRelayRule(uint8_t buttonNumber, int relay_gpio);
 
 void addPredefinedRules(const GpioFactorySettingsStruct& gpio_settings);
 
@@ -112,6 +117,8 @@ void addPredefinedRules(const GpioFactorySettingsStruct& gpio_settings);
 bool getGpioInfo(int gpio, int& pinnr, bool& input, bool& output, bool& warning);
 
 bool getGpioPullResistor(int gpio, bool& hasPullUp, bool& hasPullDown);
+
+bool validGpio(int gpio);
 
 
 #ifdef ESP32

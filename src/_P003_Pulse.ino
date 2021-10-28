@@ -55,7 +55,7 @@ bool validIntFromString(const String& tBuf,
                         int         & result);
 
 
-boolean Plugin_003(byte function, struct EventStruct *event, String& string)
+boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
 {
   boolean success = false;
 
@@ -103,7 +103,7 @@ boolean Plugin_003(byte function, struct EventStruct *event, String& string)
                         , PCONFIG(P003_IDX_DEBOUNCETIME));
 
       {
-        byte choice  = PCONFIG(P003_IDX_COUNTERTYPE);
+        uint8_t choice  = PCONFIG(P003_IDX_COUNTERTYPE);
         const __FlashStringHelper *options[P003_NR_COUNTERTYPES] = P003_COUNTERTYPE_LIST;
         addFormSelector(F("Counter Type"), F("p003_countertype"), P003_NR_COUNTERTYPES, options, NULL, choice);
         if (choice != 0) {
@@ -159,6 +159,7 @@ boolean Plugin_003(byte function, struct EventStruct *event, String& string)
         switch (PCONFIG(P003_IDX_COUNTERTYPE))
         {
           case P003_CT_INDEX_COUNTER:
+          case P003_CT_INDEX_COUNTER_TOTAL:
           {
             P003_data->pulseHelper.setPulseCounter(UserVar[event->BaseVarIndex + P003_IDX_pulseCounter]);
             break;
@@ -173,16 +174,13 @@ boolean Plugin_003(byte function, struct EventStruct *event, String& string)
           {
             break;
           }
-          case P003_CT_INDEX_COUNTER_TOTAL:
-          {
-            P003_data->pulseHelper.setPulseCounter(UserVar[event->BaseVarIndex + P003_IDX_pulseCounter]);
-            break;
-          }
         }
 
         if (loglevelActiveFor(LOG_LEVEL_INFO)) {
-          String log; log.reserve(20);
-          log = F("INIT : PulsePin: "); log += Settings.TaskDevicePin1[event->TaskIndex];
+          String log; 
+          log.reserve(20);
+          log = F("INIT : PulsePin: "); 
+          log += Settings.TaskDevicePin1[event->TaskIndex];
           addLog(LOG_LEVEL_INFO, log);
         }
 
@@ -262,7 +260,7 @@ boolean Plugin_003(byte function, struct EventStruct *event, String& string)
           //     to the first active P003 task instance
 
           // Legacy: Allow for an optional taskIndex parameter.
-          byte tidx = 1;
+          uint8_t tidx = 1;
 
           if (command == F("setpulsecountertotal")) { tidx = 2; }
 
