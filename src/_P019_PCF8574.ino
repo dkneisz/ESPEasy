@@ -2,7 +2,6 @@
 #ifdef USES_P019
 
 #include "src/DataStructs/PinMode.h"
-#include "src/Commands/GPIO.h"
 #include "src/ESPEasyCore/ESPEasyGPIO.h"
 
 // #######################################################################################################
@@ -445,7 +444,7 @@ boolean Plugin_019(uint8_t function, struct EventStruct *event, String& string)
               log += state;
               log += output_value == 3 ? F(" Doubleclick=") : F(" Output value=");
               log += output_value;
-              addLog(LOG_LEVEL_INFO, log);
+              addLogMove(LOG_LEVEL_INFO, log);
             }
             // send task event
             sendData(event);
@@ -510,7 +509,7 @@ boolean Plugin_019(uint8_t function, struct EventStruct *event, String& string)
               log += state ? '1' : '0';
               log += F(" Output value=");
               log += output_value;
-              addLog(LOG_LEVEL_INFO, log);
+              addLogMove(LOG_LEVEL_INFO, log);
             }
             // send task event
             sendData(event);
@@ -536,7 +535,7 @@ boolean Plugin_019(uint8_t function, struct EventStruct *event, String& string)
               log += CONFIG_PORT;
               log += F(" State=");
               log += tempUserVar;
-              addLog(LOG_LEVEL_INFO, log);
+              addLogMove(LOG_LEVEL_INFO, log);
             }
             // send task event: DO NOT SEND TASK EVENT
             //sendData(event);
@@ -559,7 +558,7 @@ boolean Plugin_019(uint8_t function, struct EventStruct *event, String& string)
           String log = F("PCF  : Port=");
           log += CONFIG_PORT;
           log += F(" is offline (EVENT= -1)");
-          addLog(LOG_LEVEL_INFO, log);
+          addLogMove(LOG_LEVEL_INFO, log);
         }
         // send task event
         sendData(event);
@@ -588,7 +587,7 @@ boolean Plugin_019(uint8_t function, struct EventStruct *event, String& string)
         log += CONFIG_PORT;
         log += F(" State=");
         log += UserVar[event->BaseVarIndex];
-        addLog(LOG_LEVEL_INFO, log);
+        addLogMove(LOG_LEVEL_INFO, log);
       }
       success = true;
       break;

@@ -179,7 +179,7 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
             addRowLabel(RGB.substring(i, i + 1));
             String id = F("p050_cal_");
             for (int j = 0; j < 3; j++) {
-              addHtml(String(static_cast<char>('a' + i)));
+              addHtml(static_cast<char>('a' + i));
               addHtml(F("<sub>"));
               addHtmlInt(j + 1);
               addHtml(F("</sub>"));
@@ -254,12 +254,7 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_EXIT:
     {
-      P050_data_struct *P050_data = static_cast<P050_data_struct *>(getPluginTaskData(event->TaskIndex));
-
-      if (nullptr != P050_data) {
-        delete P050_data; // call destructor
-        success = true;
-      }
+      success = true;
       break;
     }
 
@@ -366,7 +361,7 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
           log += formatUserVarNoCheck(event->TaskIndex, 1);
           log += F(" B: ");
           log += formatUserVarNoCheck(event->TaskIndex, 2);
-          addLog(LOG_LEVEL_INFO, log);
+          addLogMove(LOG_LEVEL_INFO, log);
         }
 
 #ifdef P050_OPTION_RGB_EVENTS
@@ -378,7 +373,8 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
           for (int i = 0; i < 6; i++) {
             if (i != PCONFIG(2)) { // Skip currently selected RGB output to keep nr. of events a bit limited
               sRGBFactor = 1.0f;
-              RuleEvent  = getTaskDeviceName(event->TaskIndex);
+              RuleEvent.clear();
+              RuleEvent += getTaskDeviceName(event->TaskIndex);
               RuleEvent += '#';
               switch (i) {
               case 0:
@@ -408,11 +404,11 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
                   nb = static_cast<float>(b) / t * sRGBFactor;
                   P050_data->applyTransformation(nr, ng, nb, &tr, &tg, &tb);
                 }
-                RuleEvent += String(tr, 4);
+                RuleEvent += toString(tr, 4);
                 RuleEvent += ',';
-                RuleEvent += String(tg, 4);
+                RuleEvent += toString(tg, 4);
                 RuleEvent += ',';
-                RuleEvent += String(tb, 4);
+                RuleEvent += toString(tb, 4);
                 break;
               case 2:
                 sRGBFactor = 255.0f;
@@ -423,18 +419,18 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
                 } else {
                   RuleEvent += F("NormSRGB=");
                 }
-                RuleEvent += String(static_cast<float>(r) / t * sRGBFactor, 4);
+                RuleEvent += toString(static_cast<float>(r) / t * sRGBFactor, 4);
                 RuleEvent += ',';
-                RuleEvent += String(static_cast<float>(g) / t * sRGBFactor, 4);
+                RuleEvent += toString(static_cast<float>(g) / t * sRGBFactor, 4);
                 RuleEvent += ',';
-                RuleEvent += String(static_cast<float>(b) / t * sRGBFactor, 4);
+                RuleEvent += toString(static_cast<float>(b) / t * sRGBFactor, 4);
                 break;
               default:
-                RuleEvent = EMPTY_STRING;
+                RuleEvent.clear();
                 break;
               }
               if (!RuleEvent.isEmpty()) {
-                eventQueue.add(RuleEvent);
+                eventQueue.addMove(std::move(RuleEvent));
               }
             }
           }
@@ -446,7 +442,8 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
           String RuleEvent;
           RuleEvent.reserve(48);
           for (int i = 0; i < 4; i++) {
-            RuleEvent  = getTaskDeviceName(event->TaskIndex);
+            RuleEvent.clear();
+            RuleEvent += getTaskDeviceName(event->TaskIndex);
             RuleEvent += '#';
             switch (i) {
             case 0:
@@ -466,11 +463,11 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
               RuleEvent += c;
               break;
             default:
-              RuleEvent = EMPTY_STRING;
+              RuleEvent.clear();
               break;
             }
             if (!RuleEvent.isEmpty()) {
-              eventQueue.add(RuleEvent);
+              eventQueue.addMove(std::move(RuleEvent));
             }
           }
         }

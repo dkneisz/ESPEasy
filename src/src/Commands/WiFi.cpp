@@ -4,6 +4,8 @@
 
 #include "../Commands/Common.h"
 
+#include "../DataStructs/ESPEasy_EventStruct.h"
+
 #include "../ESPEasyCore/ESPEasyWifi.h"
 #include "../ESPEasyCore/Serial.h"
 
@@ -55,7 +57,7 @@ String Command_Wifi_Key2(struct EventStruct *event, const char *Line)
 
 const __FlashStringHelper * Command_Wifi_Scan(struct EventStruct *event, const char *Line)
 {
-  WifiScan();
+  WiFiScan_log_to_serial();
   return return_command_success();
 }
 

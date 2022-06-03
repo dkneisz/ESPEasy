@@ -19,6 +19,10 @@
   #define STR(x) STR_HELPER(x)
 #endif
 
+#ifdef USE_SECOND_HEAP
+  #include <umm_malloc/umm_heap_select.h>
+#endif
+
 #ifdef __GCC__
 #pragma GCC system_header
 #endif
@@ -62,14 +66,19 @@ namespace std
 #include "src/Globals/RamTracker.h"
 
 
-#define FS_NO_GLOBALS
+#ifndef FS_NO_GLOBALS
+  #define FS_NO_GLOBALS
+#endif
 #if defined(ESP8266)
-  #include "core_version.h"
+
+  #ifndef CORE_POST_3_0_0
+    #define IRAM_ATTR ICACHE_RAM_ATTR
+  #endif
+
+
+
+  #include <core_version.h>
   #define NODE_TYPE_ID      NODE_TYPE_ID_ESP_EASYM_STD
-  #define FILE_CONFIG       "config.dat"
-  #define FILE_SECURITY     "security.dat"
-  #define FILE_NOTIFICATION "notification.dat"
-  #define FILE_RULES        "rules1.txt"
   #include <lwip/init.h>
   #ifndef LWIP_VERSION_MAJOR
     #error
@@ -84,13 +93,13 @@ namespace std
   #ifndef LWIP_OPEN_SRC
   #define LWIP_OPEN_SRC
   #endif
-  #include "lwip/opt.h"
-  #include "lwip/udp.h"
-  #include "lwip/igmp.h"
-  #include "include/UdpContext.h"
-  #include "limits.h"
+  #include <lwip/opt.h>
+  #include <lwip/udp.h>
+  #include <lwip/igmp.h>
+  #include <include/UdpContext.h>
+  #include <limits.h>
   extern "C" {
-   #include "user_interface.h"
+   #include <user_interface.h>
   }
 
   #define SMALLEST_OTA_IMAGE 276848 // smallest known 2-step OTA image
@@ -111,10 +120,6 @@ namespace std
   #if ESP_IDF_VERSION_MAJOR < 3
     #define ICACHE_RAM_ATTR IRAM_ATTR
   #endif
-  #define FILE_CONFIG       "/config.dat"
-  #define FILE_SECURITY     "/security.dat"
-  #define FILE_NOTIFICATION "/notification.dat"
-  #define FILE_RULES        "/rules1.txt"
   #include <WiFi.h>
 //  #include  "esp32_ping.h"
 
@@ -129,12 +134,28 @@ namespace std
   #endif
   
   #include <esp_wifi.h> // Needed to call ESP-IDF functions like esp_wifi_....
-  #ifdef PLUGIN_BUILD_MAX_ESP32
-  #define MAX_SKETCH_SIZE 4194304   // 0x400000 look at partitions in csv file
-  #else // PLUGIN_BUILD_MAX_ESP32
-  #define MAX_SKETCH_SIZE 1900544   // 0x1d0000 look at partitions in csv file
-  #endif // PLUGIN_BUILD_MAX_ESP32
 #endif
+
+#ifdef USE_LITTLEFS
+  #ifdef ESP32
+    #if ESP_IDF_VERSION_MAJOR >= 4
+      #include <LittleFS.h>
+      #define ESPEASY_FS LittleFS
+    #else
+      #include <LITTLEFS.h>
+      #define ESPEASY_FS LITTLEFS
+    #endif
+  #else
+    #include <LittleFS.h>
+    #define ESPEASY_FS LittleFS
+  #endif
+#else 
+  #ifdef ESP32
+    #include <SPIFFS.h>
+  #endif
+  #define ESPEASY_FS SPIFFS
+#endif
+
 
 #include <WiFiUdp.h>
 #include <Wire.h>
@@ -147,21 +168,6 @@ using namespace fs;
 #endif
 #include <base64.h>
 
-
-#ifdef USE_LITTLEFS
-  #ifdef ESP32
-    #include <LITTLEFS.h>
-    #define ESPEASY_FS LITTLEFS
-  #else
-    #include <LittleFS.h>
-    #define ESPEASY_FS LittleFS
-  #endif
-#else 
-  #ifdef ESP32
-    #include <SPIFFS.h>
-  #endif
-  #define ESPEASY_FS SPIFFS
-#endif
 
 // Include custom first, then build info. (one may want to set BUILD_GIT for example)
 #include "src/CustomBuild/ESPEasy_buildinfo.h"

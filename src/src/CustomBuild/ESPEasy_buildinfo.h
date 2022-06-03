@@ -1,5 +1,5 @@
-#ifndef ESPEASY_BUILD_INFO_H
-#define ESPEASY_BUILD_INFO_H
+#ifndef CUSTOMBUILD_ESPEASY_BUILD_INFO_H
+#define CUSTOMBUILD_ESPEASY_BUILD_INFO_H
 
 
 // ********************************************************************************
@@ -40,5 +40,10 @@
 # define BUILD_GIT "(custom)"
 #endif // ifndef BUILD_GIT
 
+// Development of ESPEasy-NOW layer has been paid for by a customer who agreed to make it Open Source.
+// Therefore they use a different name in their builds.
+#ifndef ESPEASY_NOW_NAME
+# define ESPEASY_NOW_NAME "ESPEasy-NOW"
+#endif
 
-#endif // ESPEASY_BUILD_INFO_H
+#endif // CUSTOMBUILD_ESPEASY_BUILD_INFO_H

@@ -140,10 +140,10 @@ public:
   void sendCommand(const uint8_t cmd)
   {
     sendCommandTime = millis();
-    pinMode(_dataPin, OUTPUT);
-
+    
     // Transmission Start sequence
     digitalWrite(_dataPin, HIGH);
+    pinMode(_dataPin, OUTPUT);
     digitalWrite(_clockPin, HIGH);
     P031_DELAY_LONGER_CABLES
     digitalWrite(_dataPin, LOW);
@@ -159,10 +159,11 @@ public:
     p031_shiftOut(_dataPin, _clockPin, MSBFIRST, cmd);
 
     // Wait for ACK
+    pinMode(_dataPin, input_mode);
     bool ackerror = false;
     digitalWrite(_clockPin, HIGH);
     P031_DELAY_LONGER_CABLES
-    pinMode(_dataPin, input_mode);
+
     if (digitalRead(_dataPin) != LOW) ackerror = true;
     digitalWrite(_clockPin, LOW);
     P031_DELAY_LONGER_CABLES
@@ -321,10 +322,14 @@ boolean Plugin_031(uint8_t function, struct EventStruct *event, String& string)
         if (nullptr == P031_data) {
           return success;
         }
-        uint8_t status = P031_data->init(
+        #ifndef BUILD_NO_DEBUG
+        uint8_t status = 
+        #endif
+        P031_data->init(
           CONFIG_PIN1, CONFIG_PIN2,
           Settings.TaskDevicePin1PullUp[event->TaskIndex],
           PCONFIG(0));
+        #ifndef BUILD_NO_DEBUG
         if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
           String log = F("SHT1X : Status uint8_t: ");
           log += String(status, HEX);
@@ -334,8 +339,9 @@ boolean Plugin_031(uint8_t function, struct EventStruct *event, String& string)
           log += (((status >> 1) & 1) ? F("yes") : F("no"));
           log += F(", heater: ");
           log += (((status >> 2) & 1) ? F("on") : F("off"));
-          addLog(LOG_LEVEL_DEBUG, log);
+          addLogMove(LOG_LEVEL_DEBUG, log);
         }
+        #endif
         success = true;
         break;
       }

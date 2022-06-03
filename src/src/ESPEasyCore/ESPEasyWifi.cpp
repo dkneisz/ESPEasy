@@ -121,14 +121,11 @@ bool ESPEasyWiFi_t::connectSTA() {
   }
   WiFiEventData.warnedNoValidWiFiSettings = false;
   setSTA(true);
-  char hostname[40];
-  safe_strncpy(hostname, NetworkCreateRFCCompliantHostname().c_str(), sizeof(hostname));
   #if defined(ESP8266)
-  wifi_station_set_hostname(hostname);
+  wifi_station_set_hostname(NetworkCreateRFCCompliantHostname().c_str());
 
   #endif // if defined(ESP8266)
   #if defined(ESP32)
-  WiFi.setHostname(hostname);
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
   #endif // if defined(ESP32)
   setConnectionSpeed();
@@ -223,6 +220,14 @@ bool WiFiConnected() {
 
   static bool recursiveCall = false;
 
+  static uint32_t lastCheckedTime = 0;
+  static bool lastState = false;
+
+  if (timePassedSince(lastCheckedTime) < 10) {
+    // Try to rate-limit the nr of calls to this function or else it will be called 1000's of times a second.
+    return lastState;
+  }
+
 
   if (WiFiEventData.unprocessedWifiEvents()) { return false; }
 
@@ -277,14 +282,19 @@ bool WiFiConnected() {
     STOP_TIMER(WIFI_ISCONNECTED_STATS);
     recursiveCall = false;
     // Only return true after some time since it got connected.
+    #ifdef ESP8266
     SetWiFiTXpower();
-    return WiFiEventData.wifi_considered_stable || WiFiEventData.lastConnectMoment.timeoutReached(100);
+    #endif
+    lastState = WiFiEventData.wifi_considered_stable || WiFiEventData.lastConnectMoment.timeoutReached(100);
+    lastCheckedTime = millis();
+    return lastState;
   }
 
   if ((WiFiEventData.timerAPstart.isSet()) && WiFiEventData.timerAPstart.timeReached()) {
     // Timer reached, so enable AP mode.
     if (!WifiIsAP(WiFi.getMode())) {
       if (!Settings.DoNotStartAP()) {
+        WifiScan(false);
         setAP(true);
       }
     }
@@ -325,9 +335,6 @@ void WiFiConnectRelaxed() {
     return;
   }
   if (WiFiEventData.unprocessedWifiEvents()) {
-    handle_unprocessedNetworkEvents();
-  }
-  if (WiFiEventData.unprocessedWifiEvents()) {
     if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
       String log = F("WiFi : Connecting not possible, unprocessed WiFi events: ");
       if (!WiFiEventData.processedConnect) {
@@ -343,7 +350,7 @@ void WiFiConnectRelaxed() {
         log += F(" DHCP_t/o");
       }
       
-      addLog(LOG_LEVEL_ERROR, log);
+      addLogMove(LOG_LEVEL_ERROR, log);
     }
     return;
   }
@@ -370,6 +377,10 @@ void AttemptWiFiConnect() {
     return;
   }
 
+  if (WiFiEventData.wifiConnectInProgress) {
+    return;
+  }
+
   if (WiFiEventData.wifiSetupConnect) {
     // wifiSetupConnect is when run from the setup page.
     RTC.clearLastWiFi(); // Force slow connect
@@ -380,8 +391,6 @@ void AttemptWiFiConnect() {
     }
   }
 
-  WiFiEventData.markWiFiTurnOn();
-
   if (WiFi_AP_Candidates.getNext(WiFiScanAllowed())) {
     const WiFi_AP_Candidate candidate = WiFi_AP_Candidates.getCurrent();
 
@@ -390,19 +399,22 @@ void AttemptWiFiConnect() {
       log += candidate.toString();
       log += F(" attempt #");
       log += WiFiEventData.wifi_connect_attempt;
-      addLog(LOG_LEVEL_INFO, log);
+      addLogMove(LOG_LEVEL_INFO, log);
     }
     WiFiEventData.markWiFiBegin();
     if (prepareWiFi()) {
       RTC.clearLastWiFi();
       float tx_pwr = 0; // Will be set higher based on RSSI when needed.
       // FIXME TD-er: Must check WiFiEventData.wifi_connect_attempt to increase TX power
+      #ifdef ESP8266
       if (Settings.UseMaxTXpowerForSending()) {
         tx_pwr = Settings.getWiFi_TX_power();
       }
       SetWiFiTXpower(tx_pwr, candidate.rssi);
+      #endif
       // Start connect attempt now, so no longer needed to attempt new connection.
       WiFiEventData.wifiConnectAttemptNeeded = false;
+      WiFiEventData.wifiConnectInProgress = true;
       if (candidate.allowQuickConnect() && !candidate.isHidden) {
         WiFi.begin(candidate.ssid.c_str(), candidate.key.c_str(), candidate.channel, candidate.bssid.mac);
       } else {
@@ -414,11 +426,14 @@ void AttemptWiFiConnect() {
   } else {
     if (!wifiAPmodeActivelyUsed() || WiFiEventData.wifiSetupConnect) {
       if (!prepareWiFi()) {
-        return;
+        //return;
       }
-      // Maybe not scan async to give the ESP some slack in power consumption?
-      const bool async = false;
-      WifiScan(async);
+
+      if (WiFiScanAllowed()) {
+        // Maybe not scan async to give the ESP some slack in power consumption?
+        const bool async = false;
+        WifiScan(async);
+      }
     }
   }
 
@@ -440,6 +455,7 @@ bool prepareWiFi() {
 
     // No need to wait longer to start AP mode.
     if (!Settings.DoNotStartAP()) {
+      WifiScan(false);
       setAP(true);
     }
     return false;
@@ -447,14 +463,11 @@ bool prepareWiFi() {
   WiFiEventData.warnedNoValidWiFiSettings = false;
   setSTA(true);
 
-  char hostname[40];
-  safe_strncpy(hostname, NetworkCreateRFCCompliantHostname().c_str(), sizeof(hostname));
   #if defined(ESP8266)
-  wifi_station_set_hostname(hostname);
+  wifi_station_set_hostname(NetworkCreateRFCCompliantHostname().c_str());
 
   #endif // if defined(ESP8266)
   #if defined(ESP32)
-  WiFi.setHostname(hostname);
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
   #endif // if defined(ESP32)
   setConnectionSpeed();
@@ -501,7 +514,7 @@ bool checkAndResetWiFi() {
   }
   #endif
   String log = F("WiFi : WiFiConnected() out of sync: ");
-  log += ESPeasyWifiStatusToString();
+  log += WiFiEventData.ESPeasyWifiStatusToString();
   log += F(" RSSI: ");
   log += String(WiFi.RSSI());
   #ifdef ESP8266
@@ -511,7 +524,7 @@ bool checkAndResetWiFi() {
 
   // Call for reset first, to make sure a syslog call will not try to send.
   resetWiFi();
-  addLog(LOG_LEVEL_INFO, log);
+  addLogMove(LOG_LEVEL_INFO, log);
   return true;
 }
 
@@ -534,14 +547,27 @@ void resetWiFi() {
   initWiFi();
 }
 
+#ifdef ESP32
+void removeWiFiEventHandler()
+{
+  WiFi.removeEvent(wm_event_id);
+}
+
+void registerWiFiEventHandler()
+{
+  wm_event_id = WiFi.onEvent(WiFiEvent);
+}
+#endif
+
+
 void initWiFi()
 {
 #ifdef ESP8266
 
   // See https://github.com/esp8266/Arduino/issues/5527#issuecomment-460537616
   // FIXME TD-er: Do not destruct WiFi object, it may cause crashes with queued UDP traffic.
-  WiFi.~ESP8266WiFiClass();
-  WiFi = ESP8266WiFiClass();
+//  WiFi.~ESP8266WiFiClass();
+//  WiFi = ESP8266WiFiClass();
 #endif // ifdef ESP8266
 
   WiFi.persistent(false); // Do not use SDK storage of SSID/WPA parameters
@@ -568,6 +594,7 @@ void initWiFi()
 // ********************************************************************************
 // Configure WiFi TX power
 // ********************************************************************************
+#ifdef ESP8266
 void SetWiFiTXpower() {
   SetWiFiTXpower(0.0f); // Just some minimal value, will be adjusted in SetWiFiTXpower
 }
@@ -677,22 +704,23 @@ void SetWiFiTXpower(float dBm, float rssi) {
       if (TX_pwr_int != last_log) {
         last_log = TX_pwr_int;
         String log = F("WiFi : Set TX power to ");
-        log += String(dBm, 0);
+        log += toString(dBm, 0);
         log += F("dBm");
         log += F(" sensitivity: ");
-        log += String(threshold, 0);
+        log += toString(threshold, 0);
         log += F("dBm");
         if (rssi < 0) {
           log += F(" RSSI: ");
-          log += String(rssi, 0);
+          log += toString(rssi, 0);
           log += F("dBm");
         }
-        addLog(LOG_LEVEL_DEBUG, log);
+        addLogMove(LOG_LEVEL_DEBUG, log);
       }
     }
   }
   #endif
 }
+#endif
 
 float GetRSSIthreshold(float& maxTXpwr) {
   maxTXpwr = Settings.getWiFi_TX_power();
@@ -773,6 +801,9 @@ void WifiDisconnect()
   #endif // if defined(ESP32)
   WiFiEventData.setWiFiDisconnected();
   WiFiEventData.markDisconnect(WIFI_DISCONNECT_REASON_ASSOC_LEAVE);
+  if (!Settings.UseLastWiFiFromRTC()) {
+    RTC.clearLastWiFi();
+  }
   delay(1);
 }
 
@@ -805,7 +836,7 @@ bool WiFiScanAllowed() {
         log += F(" DHCP_t/o");
       }
       
-      addLog(LOG_LEVEL_ERROR, log);
+      addLogMove(LOG_LEVEL_ERROR, log);
     }
     return false;
   }
@@ -842,6 +873,14 @@ void WifiScan(bool async, uint8_t channel) {
   if (!WiFiScanAllowed()) {
     return;
   }
+#ifdef ESP32
+  // TD-er: Don't run async scan on ESP32.
+  // Since IDF 4.4 it seems like the active channel may be messed up when running async scan
+  // Perform a disconnect after scanning.
+  // See: https://github.com/letscontrolit/ESPEasy/pull/3579#issuecomment-967021347
+  async = false;
+#endif
+
   START_TIMER;
   WiFiEventData.lastScanMoment.setNow();
   if (loglevelActiveFor(LOG_LEVEL_INFO)) {
@@ -851,7 +890,7 @@ void WifiScan(bool async, uint8_t channel) {
       String log;
       log = F("WiFi : Start network scan channel ");
       log += channel;
-      addLog(LOG_LEVEL_INFO, log);
+      addLogMove(LOG_LEVEL_INFO, log);
     }
   }
   bool show_hidden         = true;
@@ -866,7 +905,7 @@ void WifiScan(bool async, uint8_t channel) {
       FeedSW_watchdog();
     }
     --nrScans;
-    #ifdef ESP8266
+#ifdef ESP8266
     /*
     {
       static bool FIRST_SCAN = true;
@@ -891,24 +930,30 @@ void WifiScan(bool async, uint8_t channel) {
     }
     */
     WiFi.scanNetworks(async, show_hidden, channel);
-    #endif
-    #ifdef ESP32
+#endif
+#ifdef ESP32
     const bool passive = false;
     const uint32_t max_ms_per_chan = 300;
     WiFi.scanNetworks(async, show_hidden, passive, max_ms_per_chan /*, channel */);
-    #endif
+#endif
     if (!async) {
       FeedSW_watchdog();
       processScanDone();
     }
   }
   STOP_TIMER(async ? WIFI_SCAN_ASYNC : WIFI_SCAN_SYNC);
+
+#ifdef ESP32
+  RTC.clearLastWiFi();
+  WifiDisconnect();
+#endif
+
 }
 
 // ********************************************************************************
 // Scan all Wifi Access Points
 // ********************************************************************************
-void WifiScan()
+void WiFiScan_log_to_serial()
 {
   // Direct Serial is allowed here, since this function will only be called from serial input.
   serialPrintln(F("WIFI : SSID Scan start"));
@@ -977,7 +1022,6 @@ void setAP(bool enable) {
     case WIFI_OFF:
 
       if (enable) { 
-        WifiScan(false);
         setWifiMode(WIFI_AP); 
       }
       break;
@@ -1019,7 +1063,7 @@ void setAPinternal(bool enable)
         log += softAPSSID;
         log += F(" with address ");
         log += WiFi.softAPIP().toString();
-        addLog(LOG_LEVEL_INFO, log);
+        addLogMove(LOG_LEVEL_INFO, log);
       }
     } else {
       if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
@@ -1027,7 +1071,7 @@ void setAPinternal(bool enable)
         log += softAPSSID;
         log += F(" IP: ");
         log += apIP.toString();
-        addLog(LOG_LEVEL_ERROR, log);
+        addLogMove(LOG_LEVEL_ERROR, log);
       }
     }
     #ifdef ESP32
@@ -1073,15 +1117,17 @@ void setWifiMode(WiFiMode_t wifimode) {
 
   if (cur_mode == WIFI_OFF) {
     WiFiEventData.markWiFiTurnOn();
-
+  }
+  if (wifimode != WIFI_OFF) {
     #if defined(ESP32)
-    esp_wifi_set_ps(WIFI_PS_NONE);
+    // Needs to be set before calling WiFi.mode() on ESP32
+    WiFi.hostname(NetworkCreateRFCCompliantHostname());
     #endif
-    #ifdef ESP8266
 
+    #ifdef ESP8266
     // See: https://github.com/esp8266/Arduino/issues/6172#issuecomment-500457407
     WiFi.forceSleepWake(); // Make sure WiFi is really active.
-    #endif // ifdef ESP8266
+    #endif
     delay(100);
   }
 
@@ -1106,7 +1152,7 @@ void setWifiMode(WiFiMode_t wifimode) {
     WiFiEventData.markWiFiTurnOn();
     delay(100);
     #if defined(ESP32)
-    esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+//    esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
     #endif
     #ifdef ESP8266
     WiFi.forceSleepBegin();
@@ -1146,8 +1192,9 @@ void setWifiMode(WiFiMode_t wifimode) {
         #endif
       }
     }
-
+#ifdef ESP8266
     SetWiFiTXpower();
+#endif
     if (WifiIsSTA(wifimode)) {
       if (WiFi.getAutoConnect()) {
         WiFi.setAutoConnect(false); 
@@ -1290,7 +1337,7 @@ void setupStaticIPconfig() {
     log += formatIP(subnet);
     log += F(" DNS: ");
     log += formatIP(dns);
-    addLog(LOG_LEVEL_INFO, log);
+    addLogMove(LOG_LEVEL_INFO, log);
   }
   WiFi.config(ip, gw, subnet, dns);
 }
@@ -1311,24 +1358,6 @@ String formatScanResult(int i, const String& separator, int32_t& rssi) {
 }
 
 
-String ESPeasyWifiStatusToString() {
-  String log;
-  if (WiFiEventData.WiFiDisconnected()) {
-    log = F("DISCONNECTED");
-  } else {
-    if (WiFiEventData.WiFiConnected()) {
-      log += F("Conn. ");
-    }
-    if (WiFiEventData.WiFiGotIP()) {
-      log += F("IP ");
-    }
-    if (WiFiEventData.WiFiServicesInitialized()) {
-      log += F("Init");
-    }
-  }
-  return log;
-}
-
 void logConnectionStatus() {
   static unsigned long lastLog = 0;
   if (lastLog != 0 && timePassedSince(lastLog) < 1000) {
@@ -1346,7 +1375,7 @@ void logConnectionStatus() {
       log += SDKwifiStatusToString(sdk_wifistatus);
       log += F(" Arduino status: ");
       log += ArduinoWifiStatusToString(arduino_corelib_wifistatus);
-      addLog(LOG_LEVEL_ERROR, log);
+      addLogMove(LOG_LEVEL_ERROR, log);
     }
   }
   #endif
@@ -1355,8 +1384,8 @@ void logConnectionStatus() {
     String log = F("WIFI : Arduino wifi status: ");
     log += ArduinoWifiStatusToString(WiFi.status());
     log += F(" ESPeasy internal wifi status: ");
-    log += ESPeasyWifiStatusToString();
-    addLog(LOG_LEVEL_INFO, log);
+    log += WiFiEventData.ESPeasyWifiStatusToString();
+    addLogMove(LOG_LEVEL_INFO, log);
   }
 /*
   if (loglevelActiveFor(LOG_LEVEL_INFO)) {

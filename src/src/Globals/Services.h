@@ -3,13 +3,6 @@
 
 #include "../../ESPEasy_common.h"
 
-#ifdef FEATURE_ARDUINO_OTA
-  //enable Arduino OTA updating.
-  //Note: This adds around 10kb to the firmware size, and 1kb extra ram.
-  #include <ArduinoOTA.h>
-
-  extern bool ArduinoOTAtriggered;
-#endif
 
 #ifdef FEATURE_MDNS
   //enable mDNS mode (adds about 6kb ram and some bytes IRAM)
@@ -25,10 +18,10 @@
 
   #include <ESP8266WiFi.h>
   #include <ESP8266WebServer.h>
-  #include <ESP8266HTTPUpdateServer.h>
 
   extern ESP8266WebServer web_server;
   #ifndef NO_HTTP_UPDATER
+  #include <ESP8266HTTPUpdateServer.h>
   extern ESP8266HTTPUpdateServer httpUpdater;
   #endif
 
@@ -40,14 +33,21 @@
 
   #include <WiFi.h>
   #include <WebServer.h>
-  #include <ESP32HTTPUpdateServer.h>
   
   extern WebServer web_server;
   #ifndef NO_HTTP_UPDATER
+  #include <ESP32HTTPUpdateServer.h>
   extern ESP32HTTPUpdateServer httpUpdater;
   #endif
 
 #endif
+
+#ifdef FEATURE_ARDUINO_OTA
+  //enable Arduino OTA updating.
+  //Note: This adds around 10kb to the firmware size, and 1kb extra ram.
+  extern bool ArduinoOTAtriggered;
+#endif
+
 
 #ifdef FEATURE_DNS_SERVER
   #include <DNSServer.h>
@@ -57,4 +57,3 @@
 
 
 #endif // GLOBALS_SERVICES_H
-  

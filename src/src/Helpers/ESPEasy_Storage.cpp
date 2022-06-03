@@ -6,6 +6,7 @@
 
 #include "../DataStructs/TimingStats.h"
 
+#include "../DataTypes/ESPEasyFileType.h"
 #include "../DataTypes/SPI_options.h"
 
 #include "../ESPEasyCore/ESPEasy_Log.h"
@@ -34,9 +35,11 @@
 #include "../Helpers/Hardware.h"
 #include "../Helpers/Memory.h"
 #include "../Helpers/Misc.h"
+#include "../Helpers/Networking.h"
 #include "../Helpers/Numerical.h"
 #include "../Helpers/PeriodicalActions.h"
 #include "../Helpers/StringConverter.h"
+#include "../Helpers/StringParser.h"
 
 
 #ifdef ESP32
@@ -49,7 +52,7 @@ String patch_fname(const String& fname) {
   if (fname.startsWith(F("/"))) {
     return fname;
   }
-  return String(F("/")) + fname;
+  return String('/') + fname;
 }
 #endif
 #ifdef ESP8266
@@ -67,7 +70,7 @@ String FileError(int line, const char *fname)
   err += fname;
   err += F(" in ");
   err += line;
-  addLog(LOG_LEVEL_ERROR, err);
+  addLogMove(LOG_LEVEL_ERROR, err);
   return err;
 }
 
@@ -91,7 +94,7 @@ String flashGuard()
 
   if (RTC.flashDayCounter > MAX_FLASHWRITES_PER_DAY)
   {
-    String log = F("FS   : Daily flash write rate exceeded! (powercycle to reset this)");
+    String log = F("FS   : Daily flash write rate exceeded! (powercycle or send command 'resetFlashWriteCounter' to reset this)");
     addLog(LOG_LEVEL_ERROR, log);
     return log;
   }
@@ -118,6 +121,10 @@ String appendToFile(const String& fname, const uint8_t *data, unsigned int size)
 }
 
 bool fileExists(const String& fname) {
+  #ifdef USE_SECOND_HEAP
+  HeapSelectDram ephemeral;
+  #endif
+
   const String patched_fname = patch_fname(fname);
   auto search = Cache.fileExistsMap.find(patched_fname);
   if (search != Cache.fileExistsMap.end()) {
@@ -160,8 +167,8 @@ bool tryRenameFile(const String& fname_old, const String& fname_new) {
 bool tryDeleteFile(const String& fname) {
   if (fname.length() > 0)
   {
-    bool res = ESPEASY_FS.remove(patch_fname(fname));
     clearAllCaches();
+    bool res = ESPEASY_FS.remove(patch_fname(fname));
 
     // A call to GarbageCollection() will at most erase a single block. (e.g. 8k block size)
     // A deleted file may have covered more than a single block, so try to clear multiple blocks.
@@ -326,20 +333,20 @@ void fileSystemCheck()
   checkRAM(F("fileSystemCheck"));
   #endif
   addLog(LOG_LEVEL_INFO, F("FS   : Mounting..."));
-
+#if defined(ESP32) && defined(USE_LITTLEFS)
+  if (getPartionCount(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS) != 0 
+      && ESPEASY_FS.begin())
+#else
   if (ESPEASY_FS.begin())
+#endif
   {
     clearAllCaches();
-    #if defined(ESP8266)
-    fs::FSInfo fs_info;
-    ESPEASY_FS.info(fs_info);
-
     if (loglevelActiveFor(LOG_LEVEL_INFO)) {
       String log = F("FS   : Mount successful, used ");
-      log = log + fs_info.usedBytes;
-      log = log + F(" bytes of ");
-      log = log + fs_info.totalBytes;
-      addLog(LOG_LEVEL_INFO, log);
+      log += SpiffsUsedBytes();
+      log += F(" bytes of ");
+      log += SpiffsTotalBytes();
+      addLogMove(LOG_LEVEL_INFO, log);
     }
 
     // Run garbage collection before any file is open.
@@ -348,25 +355,58 @@ void fileSystemCheck()
     while (retries > 0 && GarbageCollection()) {
       --retries;
     }
-    #endif // if defined(ESP8266)
 
     fs::File f = tryOpenFile(SettingsType::getSettingsFileName(SettingsType::Enum::BasicSettings_Type).c_str(), "r");
-
-    if (!f)
-    {
+    if (f) { 
+      f.close(); 
+    } else {
       ResetFactory();
     }
-
-    if (f) { f.close(); }
   }
   else
   {
-    String log = F("FS   : Mount failed");
+    const __FlashStringHelper * log = F("FS   : Mount failed");
     serialPrintln(log);
-    addLog(LOG_LEVEL_ERROR, log);
+    addLogMove(LOG_LEVEL_ERROR, log);
     ResetFactory();
   }
 }
+
+bool FS_format() {
+  #ifdef USE_LITTLEFS
+    #ifdef ESP32
+    const bool res = ESPEASY_FS.begin(true);
+    ESPEASY_FS.end();
+    return res;
+    #else
+    return ESPEASY_FS.format();
+    #endif
+  #else
+  return ESPEASY_FS.format();
+  #endif
+}
+
+#ifdef ESP32
+
+# include <esp_partition.h>
+
+int getPartionCount(uint8_t pType, uint8_t pSubType) {
+  esp_partition_type_t partitionType       = static_cast<esp_partition_type_t>(pType);
+  esp_partition_subtype_t subtype          = static_cast<esp_partition_subtype_t>(pSubType);
+  esp_partition_iterator_t _mypartiterator = esp_partition_find(partitionType, subtype, NULL);
+  int nrPartitions                         = 0;
+
+  if (_mypartiterator) {
+    do {
+      ++nrPartitions;
+    } while ((_mypartiterator = esp_partition_next(_mypartiterator)) != NULL);
+  }
+  esp_partition_iterator_release(_mypartiterator);
+  return nrPartitions;
+}
+
+
+#endif
 
 /********************************************************************************************\
    Garbage collection
@@ -450,7 +490,7 @@ String SaveSecuritySettings() {
   if (memcmp(tmp_md5, SecuritySettings.md5, 16) != 0) {
     // Settings have changed, save to file.
     memcpy(SecuritySettings.md5, tmp_md5, 16);
-    err = SaveToFile((char *)FILE_SECURITY, 0, reinterpret_cast<const uint8_t *>(&SecuritySettings), sizeof(SecuritySettings));
+    err = SaveToFile(SettingsType::getSettingsFileName(SettingsType::Enum::SecuritySettings_Type).c_str(), 0, reinterpret_cast<const uint8_t *>(&SecuritySettings), sizeof(SecuritySettings));
 
     if (WifiIsAP(WiFi.getMode())) {
       // Security settings are saved, may be update of WiFi settings or hostname.
@@ -465,14 +505,28 @@ String SaveSecuritySettings() {
 
 void afterloadSettings() {
   ExtraTaskSettings.clear(); // make sure these will not contain old settings.
-  ResetFactoryDefaultPreference_struct pref(Settings.ResetFactoryDefaultPreference);
-  DeviceModel model = pref.getDeviceModel();
+
+  // Load ResetFactoryDefaultPreference from provisioning.dat if available.
+  uint32_t pref_temp = Settings.ResetFactoryDefaultPreference;
+  #ifdef USE_CUSTOM_PROVISIONING
+  if (fileExists(getFileName(FileType::PROVISIONING_DAT))) {
+    MakeProvisioningSettings(ProvisioningSettings);
+    if (AllocatedProvisioningSettings()) {
+      loadProvisioningSettings(ProvisioningSettings);
+      if (ProvisioningSettings.matchingFlashSize()) {
+        pref_temp = ProvisioningSettings.ResetFactoryDefaultPreference.getPreference();
+      }
+    }
+  }
+  #endif
 
   // TODO TD-er: Try to get the information from more locations to make it more persistent
   // Maybe EEPROM location?
 
-  if (modelMatchingFlashSize(model)) {
-    ResetFactoryDefaultPreference = Settings.ResetFactoryDefaultPreference;
+
+  ResetFactoryDefaultPreference_struct pref(pref_temp);
+  if (modelMatchingFlashSize(pref.getDeviceModel())) {
+    ResetFactoryDefaultPreference = pref_temp;
   }
   Scheduler.setEcoMode(Settings.EcoPowerMode());
 
@@ -520,7 +574,8 @@ String LoadSettings()
      }
    */
 
-  err = LoadFromFile((char *)FILE_SECURITY, 0, reinterpret_cast<uint8_t *>(&SecuritySettings), sizeof(SecurityStruct));
+  err = LoadFromFile(SettingsType::getSettingsFileName(SettingsType::Enum::SecuritySettings_Type).c_str(), 0, reinterpret_cast<uint8_t *>(&SecuritySettings), sizeof(SecurityStruct));
+
   md5.begin();
   md5.add(reinterpret_cast< uint8_t *>(&SecuritySettings), sizeof(SecuritySettings) - 16);
   md5.calculate();
@@ -545,6 +600,8 @@ String LoadSettings()
   SecuritySettings.validate();
   return err;
 }
+
+
 
 /********************************************************************************************\
    Disable Plugin, based on bootFailedCount
@@ -604,7 +661,7 @@ bool getAndLogSettingsParameters(bool read, SettingsType::Enum settingsType, int
     log += SettingsType::getSettingsTypeString(settingsType);
     log += F(" index: ");
     log += index;
-    addLog(LOG_LEVEL_DEBUG_DEV, log);
+    addLogMove(LOG_LEVEL_DEBUG_DEV, log);
   }
 #endif // ifndef BUILD_NO_DEBUG
   return SettingsType::getSettingsParameters(settingsType, index, offset, max_size);
@@ -615,7 +672,7 @@ bool getAndLogSettingsParameters(bool read, SettingsType::Enum settingsType, int
    Load array of Strings from Custom settings
    Use maxStringLength = 0 to optimize for size (strings will be concatenated)
  \*********************************************************************************************/
-String LoadStringArray(SettingsType::Enum settingsType, int index, String strings[], uint16_t nrStrings, uint16_t maxStringLength)
+String LoadStringArray(SettingsType::Enum settingsType, int index, String strings[], uint16_t nrStrings, uint16_t maxStringLength, uint32_t offset_in_block)
 {
   int offset, max_size;
   if (!SettingsType::getSettingsParameters(settingsType, index, offset, max_size))
@@ -635,12 +692,19 @@ String LoadStringArray(SettingsType::Enum settingsType, int index, String string
   char buffer[bufferSize] = {0};
 
   String   result;
-  uint32_t readPos       = 0;
-  uint32_t nextStringPos = 0;
+  uint32_t readPos       = offset_in_block;
+  uint32_t nextStringPos = readPos;
   uint32_t stringCount   = 0;
-  String   tmpString;
-  tmpString.reserve(bufferSize);
 
+  const uint16_t estimatedStringSize = maxStringLength > 0 ? maxStringLength : bufferSize;
+  String   tmpString;
+  {
+    #ifdef USE_SECOND_HEAP
+    // Store each string in 2nd heap
+    HeapSelectIram ephemeral;
+    #endif
+    tmpString.reserve(estimatedStringSize);
+  }
   {
     while (stringCount < nrStrings && static_cast<int>(readPos) < max_size) {
       const uint32_t readSize = std::min(bufferSize, max_size - readPos);
@@ -659,9 +723,14 @@ String LoadStringArray(SettingsType::Enum settingsType, int index, String string
               // Specific string length, so we have to set the next string position.
               nextStringPos += maxStringLength;
             }
+            #ifdef USE_SECOND_HEAP
+            // Store each string in 2nd heap
+            HeapSelectIram ephemeral;
+            #endif
+
             strings[stringCount] = tmpString;
-            tmpString            = "";
-            tmpString.reserve(readSize);
+            tmpString = String();
+            tmpString.reserve(estimatedStringSize);
             ++stringCount;
           } else {
             tmpString += buffer[i];
@@ -684,7 +753,7 @@ String LoadStringArray(SettingsType::Enum settingsType, int index, String string
    Save array of Strings from Custom settings
    Use maxStringLength = 0 to optimize for size (strings will be concatenated)
  \*********************************************************************************************/
-String SaveStringArray(SettingsType::Enum settingsType, int index, const String strings[], uint16_t nrStrings, uint16_t maxStringLength)
+String SaveStringArray(SettingsType::Enum settingsType, int index, const String strings[], uint16_t nrStrings, uint16_t maxStringLength, uint32_t posInBlock)
 {
   int offset, max_size;
   if (!SettingsType::getSettingsParameters(settingsType, index, offset, max_size))
@@ -702,10 +771,10 @@ String SaveStringArray(SettingsType::Enum settingsType, int index, const String 
   uint8_t buffer[bufferSize];
 
   String   result;
-  int      writePos        = 0;
+  int      writePos        = posInBlock;
   uint16_t stringCount     = 0;
   uint16_t stringReadPos   = 0;
-  uint16_t nextStringPos   = 0;
+  uint16_t nextStringPos   = writePos;
   uint16_t curStringLength = 0;
 
   if (maxStringLength != 0) {
@@ -804,8 +873,8 @@ String LoadTaskSettings(taskIndex_t TaskIndex)
   if (ExtraTaskSettings.TaskIndex == TaskIndex) {
     return String(); // already loaded
   }
+  ExtraTaskSettings.clear();
   if (!validTaskIndex(TaskIndex)) {
-    ExtraTaskSettings.clear();
     return String(); // Un-initialized task index.
   }
   #ifndef BUILD_NO_RAM_TRACKER
@@ -813,7 +882,6 @@ String LoadTaskSettings(taskIndex_t TaskIndex)
   #endif
 
   START_TIMER
-  ExtraTaskSettings.clear();
   const String result = LoadFromFile(SettingsType::Enum::TaskSettings_Type, TaskIndex, reinterpret_cast<uint8_t *>(&ExtraTaskSettings), sizeof(struct ExtraTaskSettingsStruct));
 
   // After loading, some settings may need patching.
@@ -846,26 +914,26 @@ String LoadTaskSettings(taskIndex_t TaskIndex)
 /********************************************************************************************\
    Save Custom Task settings to file system
  \*********************************************************************************************/
-String SaveCustomTaskSettings(taskIndex_t TaskIndex, const uint8_t *memAddress, int datasize)
+String SaveCustomTaskSettings(taskIndex_t TaskIndex, const uint8_t *memAddress, int datasize, uint32_t posInBlock)
 {
   #ifndef BUILD_NO_RAM_TRACKER
   checkRAM(F("SaveCustomTaskSettings"));
   #endif
-  return SaveToFile(SettingsType::Enum::CustomTaskSettings_Type, TaskIndex, memAddress, datasize);
+  return SaveToFile(SettingsType::Enum::CustomTaskSettings_Type, TaskIndex, memAddress, datasize, posInBlock);
 }
 
 /********************************************************************************************\
    Save array of Strings to Custom Task settings
    Use maxStringLength = 0 to optimize for size (strings will be concatenated)
  \*********************************************************************************************/
-String SaveCustomTaskSettings(taskIndex_t TaskIndex, String strings[], uint16_t nrStrings, uint16_t maxStringLength)
+String SaveCustomTaskSettings(taskIndex_t TaskIndex, String strings[], uint16_t nrStrings, uint16_t maxStringLength, uint32_t posInBlock)
 {
   #ifndef BUILD_NO_RAM_TRACKER
   checkRAM(F("SaveCustomTaskSettings"));
   #endif
   return SaveStringArray(
     SettingsType::Enum::CustomTaskSettings_Type, TaskIndex,
-    strings, nrStrings, maxStringLength);
+    strings, nrStrings, maxStringLength, posInBlock);
 }
 
 String getCustomTaskSettingsError(uint8_t varNr) {
@@ -888,13 +956,13 @@ String ClearCustomTaskSettings(taskIndex_t TaskIndex)
 /********************************************************************************************\
    Load Custom Task settings from file system
  \*********************************************************************************************/
-String LoadCustomTaskSettings(taskIndex_t TaskIndex, uint8_t *memAddress, int datasize)
+String LoadCustomTaskSettings(taskIndex_t TaskIndex, uint8_t *memAddress, int datasize, int offset_in_block)
 {
   START_TIMER;
   #ifndef BUILD_NO_RAM_TRACKER
   checkRAM(F("LoadCustomTaskSettings"));
   #endif
-  String result = LoadFromFile(SettingsType::Enum::CustomTaskSettings_Type, TaskIndex, memAddress, datasize);
+  String result = LoadFromFile(SettingsType::Enum::CustomTaskSettings_Type, TaskIndex, memAddress, datasize, offset_in_block);
   STOP_TIMER(LOAD_CUSTOM_TASK_STATS);
   return result;
 }
@@ -903,7 +971,7 @@ String LoadCustomTaskSettings(taskIndex_t TaskIndex, uint8_t *memAddress, int da
    Load array of Strings from Custom Task settings
    Use maxStringLength = 0 to optimize for size (strings will be concatenated)
  \*********************************************************************************************/
-String LoadCustomTaskSettings(taskIndex_t TaskIndex, String strings[], uint16_t nrStrings, uint16_t maxStringLength)
+String LoadCustomTaskSettings(taskIndex_t TaskIndex, String strings[], uint16_t nrStrings, uint16_t maxStringLength, uint32_t offset_in_block)
 {
   START_TIMER;
   #ifndef BUILD_NO_RAM_TRACKER
@@ -911,7 +979,7 @@ String LoadCustomTaskSettings(taskIndex_t TaskIndex, String strings[], uint16_t 
   #endif
   String result = LoadStringArray(SettingsType::Enum::CustomTaskSettings_Type,
                            TaskIndex,
-                           strings, nrStrings, maxStringLength);
+                           strings, nrStrings, maxStringLength, offset_in_block);
   STOP_TIMER(LOAD_CUSTOM_TASK_STATS);
   return result;
 }
@@ -977,6 +1045,62 @@ String LoadCustomControllerSettings(controllerIndex_t ControllerIndex, uint8_t *
   #endif
   return LoadFromFile(SettingsType::Enum::CustomControllerSettings_Type, ControllerIndex, memAddress, datasize);
 }
+
+
+#ifdef USE_CUSTOM_PROVISIONING
+/********************************************************************************************\
+   Save Provisioning Settings
+ \*********************************************************************************************/
+String saveProvisioningSettings(ProvisioningStruct& ProvisioningSettings)
+{
+  MD5Builder md5;
+  uint8_t    tmp_md5[16] = { 0 };
+  String     err;
+
+  ProvisioningSettings.validate();
+  memcpy(ProvisioningSettings.ProgmemMd5, CRCValues.runTimeMD5, 16);
+  md5.begin();
+  md5.add((uint8_t *)&ProvisioningSettings + 16, sizeof(ProvisioningSettings) - 16);
+  md5.calculate();
+  md5.getBytes(tmp_md5);
+
+  if (memcmp(tmp_md5, ProvisioningSettings.md5, 16) != 0) {
+    // Settings have changed, save to file.
+    memcpy(ProvisioningSettings.md5, tmp_md5, 16);
+    err = SaveToFile_trunc(getFileName(FileType::PROVISIONING_DAT, 0).c_str(), 0, (uint8_t *)&ProvisioningSettings, sizeof(ProvisioningStruct));
+  }
+  return err;
+}
+
+/********************************************************************************************\
+   Load Provisioning Settings
+ \*********************************************************************************************/
+String loadProvisioningSettings(ProvisioningStruct& ProvisioningSettings)
+{
+  uint8_t calculatedMd5[16] = { 0 };
+  MD5Builder md5;
+
+  String err = LoadFromFile(getFileName(FileType::PROVISIONING_DAT, 0).c_str(), 0, (uint8_t *)&ProvisioningSettings, sizeof(ProvisioningStruct));
+  md5.begin();
+  md5.add(((uint8_t *)&ProvisioningSettings) + 16, sizeof(ProvisioningSettings) - 16);
+  md5.calculate();
+  md5.getBytes(calculatedMd5);
+
+  if (memcmp(calculatedMd5, ProvisioningSettings.md5, 16) == 0) {
+    addLog(LOG_LEVEL_INFO, F("CRC  : ProvisioningSettings CRC   ...OK "));
+
+    if (memcmp(ProvisioningSettings.ProgmemMd5, CRCValues.runTimeMD5, 16) != 0) {
+      addLog(LOG_LEVEL_INFO, F("CRC  : binary has changed since last save of Settings"));
+    }
+  }
+  else {
+    addLog(LOG_LEVEL_ERROR, F("CRC  : ProvisioningSettings CRC   ...FAIL"));
+  }
+  ProvisioningSettings.validate();
+  return err;
+}
+
+#endif
 
 /********************************************************************************************\
    Save Controller settings to file system
@@ -1045,6 +1169,11 @@ String SaveToFile(const char *fname, int index, const uint8_t *memAddress, int d
   return doSaveToFile(fname, index, memAddress, datasize, "r+");
 }
 
+String SaveToFile_trunc(const char *fname, int index, const uint8_t *memAddress, int datasize)
+{
+  return doSaveToFile(fname, index, memAddress, datasize, "w+");
+}
+
 // See for mode description: https://github.com/esp8266/Arduino/blob/master/doc/filesystem.rst
 String doSaveToFile(const char *fname, int index, const uint8_t *memAddress, int datasize, const char *mode)
 {
@@ -1083,7 +1212,7 @@ String doSaveToFile(const char *fname, int index, const uint8_t *memAddress, int
   if (loglevelActiveFor(LOG_LEVEL_INFO)) {
     String log = F("SaveToFile: free stack: ");
     log += getCurrentFreeStack();
-    addLog(LOG_LEVEL_INFO, log);
+    addLogMove(LOG_LEVEL_INFO, log);
   }
   #endif
   delay(1);
@@ -1125,7 +1254,7 @@ String doSaveToFile(const char *fname, int index, const uint8_t *memAddress, int
       log += index;
       log += F(" size: ");
       log += datasize;
-      addLog(LOG_LEVEL_INFO, log);
+      addLogMove(LOG_LEVEL_INFO, log);
     }
     #endif
   } else {
@@ -1145,7 +1274,7 @@ String doSaveToFile(const char *fname, int index, const uint8_t *memAddress, int
   if (loglevelActiveFor(LOG_LEVEL_INFO)) {
     String log = F("SaveToFile: free stack after: ");
     log += getCurrentFreeStack();
-    addLog(LOG_LEVEL_INFO, log);
+    addLogMove(LOG_LEVEL_INFO, log);
   }
   #endif
 
@@ -1286,16 +1415,8 @@ String LoadFromFile(SettingsType::Enum settingsType, int index, uint8_t *memAddr
   if ((datasize + offset_in_block) > max_size) {
     return getSettingsFileDatasizeError(read, settingsType, index, datasize, max_size);
   }
-  String fname = SettingsType::getSettingsFileName(settingsType);
+  const String fname = SettingsType::getSettingsFileName(settingsType);
   return LoadFromFile(fname.c_str(), (offset + offset_in_block), memAddress, datasize);
-}
-
-String LoadFromFile(SettingsType::Enum settingsType, int index, uint8_t *memAddress, int datasize) {
-  return LoadFromFile(settingsType, index, memAddress, datasize, 0);
-}
-
-String SaveToFile(SettingsType::Enum settingsType, int index, const uint8_t *memAddress, int datasize) {
-  return SaveToFile(settingsType, index, memAddress, datasize, 0);
 }
 
 String SaveToFile(SettingsType::Enum settingsType, int index, const uint8_t *memAddress, int datasize, int posInBlock) {
@@ -1309,7 +1430,7 @@ String SaveToFile(SettingsType::Enum settingsType, int index, const uint8_t *mem
   if ((datasize > max_size) || ((posInBlock + datasize) > max_size)) {
     return getSettingsFileDatasizeError(read, settingsType, index, datasize, max_size);
   }
-  String fname = SettingsType::getSettingsFileName(settingsType);
+  const String fname = SettingsType::getSettingsFileName(settingsType);
   if (!fileExists(fname)) {
     InitFile(settingsType);
   }
@@ -1323,7 +1444,7 @@ String ClearInFile(SettingsType::Enum settingsType, int index) {
   if (!getAndLogSettingsParameters(read, settingsType, index, offset, max_size)) {
     return getSettingsFileIndexRangeError(read, settingsType, index);
   }
-  String fname = SettingsType::getSettingsFileName(settingsType);
+  const String fname = SettingsType::getSettingsFileName(settingsType);
   return ClearInFile(fname.c_str(), offset, max_size);
 }
 
@@ -1366,56 +1487,60 @@ size_t SpiffsUsedBytes() {
 }
 
 size_t SpiffsTotalBytes() {
-  size_t result = 1; // Do not output 0, this may be used in divisions.
-
-  #ifdef ESP32
-  result = ESPEASY_FS.totalBytes();
-  #endif // ifdef ESP32
-  #ifdef ESP8266
-  fs::FSInfo fs_info;
-  ESPEASY_FS.info(fs_info);
-  result = fs_info.totalBytes;
-  #endif // ifdef ESP8266
+  static size_t result = 1; // Do not output 0, this may be used in divisions.
+  if (result == 1) {
+    #ifdef ESP32
+    result = ESPEASY_FS.totalBytes();
+    #endif // ifdef ESP32
+    #ifdef ESP8266
+    fs::FSInfo fs_info;
+    ESPEASY_FS.info(fs_info);
+    result = fs_info.totalBytes;
+    #endif // ifdef ESP8266
+  }
   return result;
 }
 
 size_t SpiffsBlocksize() {
-  size_t result = 8192; // Some default viable for most 1 MB file systems
-
-  #ifdef ESP32
-  result = 8192;        // Just assume 8k, since we cannot query it
-  #endif // ifdef ESP32
-  #ifdef ESP8266
-  fs::FSInfo fs_info;
-  ESPEASY_FS.info(fs_info);
-  result = fs_info.blockSize;
-  #endif // ifdef ESP8266
+  static size_t result = 1;
+  if (result == 1) {
+    #ifdef ESP32
+    result = 8192;        // Just assume 8k, since we cannot query it
+    #endif // ifdef ESP32
+    #ifdef ESP8266
+    fs::FSInfo fs_info;
+    ESPEASY_FS.info(fs_info);
+    result = fs_info.blockSize;
+    #endif // ifdef ESP8266
+  }
   return result;
 }
 
 size_t SpiffsPagesize() {
-  size_t result = 256; // Most common
-
-  #ifdef ESP32
-  result = 256;        // Just assume 256, since we cannot query it
-  #endif // ifdef ESP32
-  #ifdef ESP8266
-  fs::FSInfo fs_info;
-  ESPEASY_FS.info(fs_info);
-  result = fs_info.pageSize;
-  #endif // ifdef ESP8266
+  static size_t result = 1;
+  if (result == 1) {
+    #ifdef ESP32
+    result = 256;        // Just assume 256, since we cannot query it
+    #endif // ifdef ESP32
+    #ifdef ESP8266
+    fs::FSInfo fs_info;
+    ESPEASY_FS.info(fs_info);
+    result = fs_info.pageSize;
+    #endif // ifdef ESP8266
+  }
   return result;
 }
 
 size_t SpiffsFreeSpace() {
   int freeSpace = SpiffsTotalBytes() - SpiffsUsedBytes();
+  const size_t blocksize = SpiffsBlocksize();
 
-  if (freeSpace < static_cast<int>(2 * SpiffsBlocksize())) {
+  if (freeSpace < static_cast<int>(2 * blocksize)) {
     // Not enough free space left to store anything
     // There needs to be minimum of 2 free blocks.
     return 0;
   }
-  return freeSpace - 2 * SpiffsBlocksize();
+  return freeSpace - 2 * blocksize;
 }
 
 bool SpiffsFull() {
@@ -1463,7 +1588,7 @@ bool getCacheFileCounters(uint16_t& lowest, uint16_t& highest, size_t& filesizeH
   highest         = 0;
   filesizeHighest = 0;
 #ifdef ESP8266
-  Dir dir = ESPEASY_FS.openDir(F("cache"));
+  fs::Dir dir = ESPEASY_FS.openDir(F("cache"));
 
   while (dir.next()) {
     String filename = dir.fileName();
@@ -1482,8 +1607,8 @@ bool getCacheFileCounters(uint16_t& lowest, uint16_t& highest, size_t& filesizeH
   }
 #endif // ESP8266
 #ifdef ESP32
-  File root = ESPEASY_FS.open(F("/"));
-  File file = root.openNextFile();
+  fs::File root = ESPEASY_FS.open(F("/"));
+  fs::File file = root.openNextFile();
 
   while (file)
   {
@@ -1549,7 +1674,13 @@ String getPartitionType(uint8_t pType, uint8_t pSubType) {
       case ESP_PARTITION_SUBTYPE_DATA_COREDUMP: return F("COREDUMP");
       case ESP_PARTITION_SUBTYPE_DATA_ESPHTTPD: return F("ESPHTTPD");
       case ESP_PARTITION_SUBTYPE_DATA_FAT:      return F("FAT");
-      case ESP_PARTITION_SUBTYPE_DATA_SPIFFS:   return F("SPIFFS");
+      case ESP_PARTITION_SUBTYPE_DATA_SPIFFS:   
+        #ifdef USE_LITTLEFS
+        return F("LittleFS");
+        #else
+        return F("SPIFFS");
+        #endif
+      case 0x99: return F("EEPROM"); // Not defined in esp_partition_subtype_t
       default: break;
     }
   }
@@ -1578,7 +1709,7 @@ String getPartitionTableHeader(const String& itemSep, const String& lineEnd) {
 String getPartitionTable(uint8_t pType, const String& itemSep, const String& lineEnd) {
   esp_partition_type_t partitionType = static_cast<esp_partition_type_t>(pType);
   String result;
-  esp_partition_iterator_t _mypartiterator = esp_partition_find(partitionType, ESP_PARTITION_SUBTYPE_ANY, NULL);
+  esp_partition_iterator_t _mypartiterator = esp_partition_find(partitionType, ESP_PARTITION_SUBTYPE_ANY, nullptr);
 
   if (_mypartiterator) {
     do {
@@ -1593,10 +1724,114 @@ String getPartitionTable(uint8_t pType, const String& itemSep, const String& lin
       result += itemSep;
       result += (_mypart->encrypted ? F("Yes") : F("-"));
       result += lineEnd;
-    } while ((_mypartiterator = esp_partition_next(_mypartiterator)) != NULL);
+    } while ((_mypartiterator = esp_partition_next(_mypartiterator)) != nullptr);
   }
   esp_partition_iterator_release(_mypartiterator);
   return result;
 }
 
 #endif // ifdef ESP32
+
+#ifdef USE_DOWNLOAD
+String downloadFileType(const String& url, const String& user, const String& pass, FileType::Enum filetype, unsigned int filenr)
+{
+  if (!getDownloadFiletypeChecked(filetype, filenr)) {
+    // Not selected, so not downloaded
+    return F("Not Allowed");
+  }
+
+  String filename = getFileName(filetype, filenr);
+  String fullUrl;
+
+  fullUrl.reserve(url.length() + filename.length() + 1); // May need to add an extra slash
+  fullUrl = url;
+  fullUrl = parseTemplate(fullUrl, true);                // URL encode
+
+  // URLEncode may also encode the '/' into "%2f"
+  // FIXME TD-er: Can this really occur?
+  fullUrl.replace(F("%2f"), F("/"));
+
+  while (filename.startsWith(F("/"))) {
+    filename = filename.substring(1);
+  }
+
+  if (!fullUrl.endsWith(F("/"))) {
+    fullUrl += F("/");
+  }
+  fullUrl += filename;
+
+  String error;
+
+  if (ResetFactoryDefaultPreference.deleteFirst()) {
+    if (fileExists(filename) && !tryDeleteFile(filename)) {
+      return F("Could not delete existing file");
+    }
+
+    if (!downloadFile(fullUrl, filename, user, pass, error)) {
+      return error;
+    }
+  } else {
+    if (fileExists(filename)) {
+      String filename_bak = filename;
+      filename_bak += F("_bak");
+      if (fileExists(filename_bak)) {
+        return F("Could not rename to _bak");
+      }
+
+      // Must download it to a tmp file.
+      String tmpfile = filename;
+      tmpfile += F("_tmp");
+
+      if (!downloadFile(fullUrl, tmpfile, user, pass, error)) {
+        return error;
+      }
+
+      if (fileExists(filename) && !tryRenameFile(filename, filename_bak)) {
+        return F("Could not rename to _bak");
+      } else {
+        // File does not exist (anymore)
+        if (!tryRenameFile(tmpfile, filename)) {
+          error = F("Could not rename tmp file");
+
+          if (tryRenameFile(filename_bak, filename)) {
+            error += F("... reverted");
+          } else {
+            error += F(" Not reverted!");
+          }
+          return error;
+        }
+      }
+    } else {
+      if (!downloadFile(fullUrl, filename, user, pass, error)) {
+        return error;
+      }
+    }
+  }
+  return error;
+}
+
+#endif // ifdef USE_DOWNLOAD
+
+#ifdef USE_CUSTOM_PROVISIONING
+
+String downloadFileType(FileType::Enum filetype, unsigned int filenr)
+{
+  if (!ResetFactoryDefaultPreference.allowFetchByCommand()) {
+    return F("Not Allowed");
+  }
+  String url, user, pass;
+
+  {
+    MakeProvisioningSettings(ProvisioningSettings);
+
+    if (AllocatedProvisioningSettings()) {
+      loadProvisioningSettings(ProvisioningSettings);
+      url  = ProvisioningSettings.url;
+      user = ProvisioningSettings.user;
+      pass = ProvisioningSettings.pass;
+    }
+  }
+  return downloadFileType(url, user, pass, filetype, filenr);
+}
+
+#endif // ifdef USE_CUSTOM_PROVISIONING

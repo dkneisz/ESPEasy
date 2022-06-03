@@ -17,6 +17,8 @@
 # include "../Helpers/Misc.h"
 # include "../Helpers/StringParser.h"
 
+# include <vector>
+
 # if defined(PLUGIN_SET_MAX) || defined(PLUGIN_BUILD_CUSTOM)
 #  define P104_USE_NUMERIC_DOUBLEHEIGHT_FONT // Enables double height numeric font for double-height time/date
 # endif // if defined(PLUGIN_SET_MAX) || defined(PLUGIN_BUILD_CUSTOM)
@@ -403,7 +405,6 @@ private:
   void   displayOneZoneText(uint8_t                 currentZone,
                             const P104_zone_struct& idx,
                             const String          & text);
-  String enquoteString(const String& input);
 
   String error;
 

@@ -24,10 +24,10 @@ else:
   custom_defines=[
     "-DCONTROLLER_SET_ALL",
     "-DNOTIFIER_SET_NONE",
-    "-DPLUGIN_BUILD_NONE",
+    "-DPLUGIN_SET_NONE",
     "-DUSES_P001",  # Switch
     "-DUSES_P002",  # ADC
-#    "-DUSES_P003",  # Generic Pulse Counter
+    "-DUSES_P003",  # Generic Pulse Counter
     "-DUSES_P004",  # Dallas DS18b20
     "-DUSES_P026",  # System info
     "-DUSES_P027",  # INA219
@@ -41,9 +41,11 @@ else:
 #    "-DUSES_P059",  # Encoder
 #    "-DUSES_P080",  # Dallas iButton
     "-DUSES_P081",  # Cron
-#    "-DUSES_P082",  # GPS
-#    "-DUSES_P085",  # AcuDC24x
-#    "-DUSES_P100",  # Pulse Counter - DS2423
+    "-DUSES_P082",  # GPS
+    "-DUSES_P085",  # AcuDC24x
+    "-DUSES_P098",  # PWM motor
+
+    "-DUSES_P100",  # Pulse Counter - DS2423
 #   "-DUSES_P087",  # Serial Proxy
 #   "-DUSES_P094",  # CUL Reader
 #   "-DUSES_P095",  # TFT ILI9341
@@ -59,6 +61,7 @@ else:
     "-DUSE_EXT_RTC",
     "-DFEATURE_I2CMULTIPLEXER",
     "-DUSE_TRIGONOMETRIC_FUNCTIONS_RULES",
+    "-DUSE_CUSTOM_PROVISIONING",
 
     "-DUSE_SETTINGS_ARCHIVE"
   ]

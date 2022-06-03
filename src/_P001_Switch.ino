@@ -3,7 +3,6 @@
 #ifdef USES_P001
 
 #include "src/DataStructs/PinMode.h"
-#include "src/Commands/GPIO.h"
 #include "src/ESPEasyCore/Controller.h"
 #include "src/ESPEasyCore/ESPEasyGPIO.h"
 #include "src/Helpers/Audio.h"
@@ -109,7 +108,7 @@ boolean Plugin_001(uint8_t function, struct EventStruct *event, String& string)
       // FIXME TD-er: Split functionality of this plugin into 2 new ones:
       // - switch/dimmer input
       // - switch output (relays)
-      event->String1 = formatGpioName_bidirectional("");
+      event->String1 = formatGpioName_bidirectional(F(""));
       break;
     }
 
@@ -526,7 +525,7 @@ boolean Plugin_001(uint8_t function, struct EventStruct *event, String& string)
                   log += state ? '1' : '0';
                   log += output_value == 3 ? F(" Doubleclick=") : F(" Output value=");
                   log += output_value;
-                  addLog(LOG_LEVEL_INFO, log);
+                  addLogMove(LOG_LEVEL_INFO, log);
                 }
                 #endif
                 // send task event
@@ -620,7 +619,7 @@ boolean Plugin_001(uint8_t function, struct EventStruct *event, String& string)
                   log += state ? '1' : '0';
                   log += F(" Output value=");
                   log += output_value;
-                  addLog(LOG_LEVEL_INFO, log);
+                  addLogMove(LOG_LEVEL_INFO, log);
                 }
                 #endif
                 // send task event
@@ -649,7 +648,7 @@ boolean Plugin_001(uint8_t function, struct EventStruct *event, String& string)
                 log += CONFIG_PIN1;
                 log += F(" State=");
                 log += tempUserVar;
-                addLog(LOG_LEVEL_INFO, log);
+                addLogMove(LOG_LEVEL_INFO, log);
               }
               #endif
               // send task event: DO NOT SEND TASK EVENT
@@ -703,7 +702,7 @@ boolean Plugin_001(uint8_t function, struct EventStruct *event, String& string)
       if (loglevelActiveFor(LOG_LEVEL_INFO)) {
         String log = F("SW   : State ");
         log += UserVar[event->BaseVarIndex];
-        addLog(LOG_LEVEL_INFO, log);
+        addLogMove(LOG_LEVEL_INFO, log);
       }
       #endif
       success = true;
@@ -723,7 +722,7 @@ boolean Plugin_001(uint8_t function, struct EventStruct *event, String& string)
         if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
           String log = F("inputswitchstate is deprecated");
           log += string;
-          addLog(LOG_LEVEL_ERROR, log);
+          addLogMove(LOG_LEVEL_ERROR, log);
         }
 
 /*        portStatusStruct tempStatus;

@@ -23,6 +23,7 @@
 
 #include "../Commands/Networks.h"
 #include "../Commands/Notifications.h"
+#include "../Commands/Provisioning.h"
 #include "../Commands/RTC.h"
 #include "../Commands/Rules.h"
 #include "../Commands/SDCARD.h"
@@ -43,11 +44,11 @@
 #include "../Helpers/StringParser.h"
 
 
-bool checkNrArguments(const char *cmd, const char *Line, int nrArguments) {
+bool checkNrArguments(const char *cmd, const String& Line, int nrArguments) {
   if (nrArguments < 0) { return true; }
 
   // 0 arguments means argument on pos1 is valid (the command) and argpos 2 should not be there.
-  if (HasArgv(Line, nrArguments + 2)) {
+  if (HasArgv(Line.c_str(), nrArguments + 2)) {
     #ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
       String log;
@@ -89,12 +90,12 @@ bool checkNrArguments(const char *cmd, const char *Line, int nrArguments) {
           }
         }
         log += F(" lineLength=");
-        log += strlen(Line);
-        addLog(LOG_LEVEL_ERROR, log);
+        log += Line.length();
+        addLogMove(LOG_LEVEL_ERROR, log);
         log  = F("Line: _");
         log += Line;
         log += '_';
-        addLog(LOG_LEVEL_ERROR, log);
+        addLogMove(LOG_LEVEL_ERROR, log);
 
         if (!Settings.TolerantLastArgParse()) {
           log = F("Command not executed!");
@@ -102,7 +103,7 @@ bool checkNrArguments(const char *cmd, const char *Line, int nrArguments) {
           log = F("Command executed, but may fail.");
         }
         log += F(" See: https://github.com/letscontrolit/ESPEasy/issues/2724");
-        addLog(LOG_LEVEL_ERROR, log);
+        addLogMove(LOG_LEVEL_ERROR, log);
       }
     }
     #endif
@@ -176,7 +177,7 @@ bool do_command_case_check(command_case_data         & data,
   // The data struct is re-used on each attempt to process an internal command.
   // Re-initialize the only two members that may have been altered by a previous call.
   data.retval = false;
-  data.status = "";
+  data.status = String();
   if (!data.cmd_lc.equals(cmd_test)) {
     return false;
   }
@@ -209,7 +210,8 @@ bool do_command_case(command_case_data         & data,
 {
   if (do_command_case_check(data, cmd_test, nrArguments, group)) {
     // It has been handled, check if we need to execute it.
-    data.status = pFunc(data.event, data.line);
+    // FIXME TD-er: Must change command function signature to use const String&
+    data.status = pFunc(data.event, data.line.c_str());
     return true;
   }
   return false;
@@ -224,7 +226,8 @@ bool do_command_case(command_case_data         & data,
 {
   if (do_command_case_check(data, cmd_test, nrArguments, group)) {
     // It has been handled, check if we need to execute it.
-    data.status = pFunc(data.event, data.line);
+    // FIXME TD-er: Must change command function signature to use const String&
+    data.status = pFunc(data.event, data.line.c_str());
     return true;
   }
   return false;
@@ -268,6 +271,7 @@ bool executeInternalCommand(command_case_data & data)
     }
     case 'c': {
       COMMAND_CASE_R( "clearaccessblock", Command_AccessInfo_Clear,   0); // Network Command
+      COMMAND_CASE_R(    "clearpassword", Command_Settings_Password_Clear,     1); // Settings.h
       COMMAND_CASE_R(      "clearrtcram", Command_RTC_Clear,          0); // RTC.h
       COMMAND_CASE_R(           "config", Command_Task_RemoteConfig, -1); // Tasks.h
       COMMAND_CASE_R("controllerdisable", Command_Controller_Disable, 1); // Controller.h
@@ -296,6 +300,7 @@ bool executeInternalCommand(command_case_data & data)
       COMMAND_CASE_R(  "ethgateway", Command_ETH_Gateway,    1); // Network Command
       COMMAND_CASE_R(   "ethsubnet", Command_ETH_Subnet,     1); // Network Command  
       COMMAND_CASE_R(      "ethdns", Command_ETH_DNS,        1); // Network Command
+      COMMAND_CASE_A("ethdisconnect", Command_ETH_Disconnect, 0); // Network Command
       COMMAND_CASE_R( "ethwifimode", Command_ETH_Wifi_Mode,  1); // Network Command
     #endif // HAS_ETHERNET
       COMMAND_CASE_R("erasesdkwifi", Command_WiFi_Erase,     0); // WiFi.h
@@ -380,6 +385,13 @@ bool executeInternalCommand(command_case_data & data)
         COMMAND_CASE_A(       "pcfpulse", Command_GPIO_Pulse,           3); // GPIO.h
       }
       COMMAND_CASE_R("password", Command_Settings_Password, 1); // Settings.h
+#ifdef USE_CUSTOM_PROVISIONING
+      COMMAND_CASE_A(       "provisionconfig", Command_Provisioning_Config,       0); // Provisioning.h
+      COMMAND_CASE_A(     "provisionsecurity", Command_Provisioning_Security,     0); // Provisioning.h
+      COMMAND_CASE_A( "provisionnotification", Command_Provisioning_Notification, 0); // Provisioning.h
+      COMMAND_CASE_A(    "provisionprovision", Command_Provisioning_Provision,    0); // Provisioning.h
+      COMMAND_CASE_A(        "provisionrules", Command_Provisioning_Rules,        1); // Provisioning.h
+#endif
       COMMAND_CASE_A(   "pulse", Command_GPIO_Pulse,        3); // GPIO.h
 #ifdef USES_MQTT
       COMMAND_CASE_A( "publish", Command_MQTT_Publish,      2); // MQTT.h
@@ -574,24 +586,28 @@ bool ExecuteCommand(taskIndex_t            taskIndex,
   delay(0);
 
   if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
-    String log = F("Command: ");
-    log += cmd;
-    addLog(LOG_LEVEL_DEBUG, log);
+    {
+      String log = F("Command: ");
+      log += cmd;
+      addLogMove(LOG_LEVEL_DEBUG, log);
+    }
 #ifndef BUILD_NO_DEBUG
     addLog(LOG_LEVEL_DEBUG, Line); // for debug purposes add the whole line.
-    String parameters;
-    parameters.reserve(64);
-    parameters += F("Par1: ");
-    parameters += TempEvent.Par1;
-    parameters += F(" Par2: ");
-    parameters += TempEvent.Par2;
-    parameters += F(" Par3: ");
-    parameters += TempEvent.Par3;
-    parameters += F(" Par4: ");
-    parameters += TempEvent.Par4;
-    parameters += F(" Par5: ");
-    parameters += TempEvent.Par5;
-    addLog(LOG_LEVEL_DEBUG, parameters);
+    {
+      String parameters;
+      parameters.reserve(64);
+      parameters += F("Par1: ");
+      parameters += TempEvent.Par1;
+      parameters += F(" Par2: ");
+      parameters += TempEvent.Par2;
+      parameters += F(" Par3: ");
+      parameters += TempEvent.Par3;
+      parameters += F(" Par4: ");
+      parameters += TempEvent.Par4;
+      parameters += F(" Par5: ");
+      parameters += TempEvent.Par5;
+      addLogMove(LOG_LEVEL_DEBUG, parameters);
+    }
 #endif // ifndef BUILD_NO_DEBUG
   }
 
@@ -629,7 +645,7 @@ bool ExecuteCommand(taskIndex_t            taskIndex,
         log += action;
         log += F(" to: ");
         log += tmpAction;
-        addLog(LOG_LEVEL_ERROR, log);
+        addLogMove(LOG_LEVEL_ERROR, log);
       }
     }
     #endif

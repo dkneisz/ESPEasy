@@ -1,7 +1,7 @@
 #include "../Helpers/StringProvider.h"
 
 #ifdef HAS_ETHERNET
-# include "ETH.h"
+# include <ETH.h>
 #endif // ifdef HAS_ETHERNET
 
 #include "../../ESPEasy-Globals.h"
@@ -22,6 +22,8 @@
 #include "../Globals/Settings.h"
 #include "../Globals/WiFi_AP_Candidates.h"
 
+#include "../Helpers/Convert.h"
+#include "../Helpers/ESPEasy_Storage.h"
 #include "../Helpers/Memory.h"
 #include "../Helpers/Misc.h"
 #include "../Helpers/Scheduler.h"
@@ -31,6 +33,8 @@
 
 #include "../WebServer/JSON.h"
 #include "../WebServer/AccessControl.h"
+
+#include "../../ESPEasy_common.h"
 
 String getInternalLabel(LabelType::Enum label, char replaceSpace) {
   return to_internal_string(getLabel(label), replaceSpace);
@@ -50,15 +54,21 @@ const __FlashStringHelper * getLabel(LabelType::Enum label) {
     case LabelType::LOAD_PCT:               return F("Load");
     case LabelType::LOOP_COUNT:             return F("Load LC");
     case LabelType::CPU_ECO_MODE:           return F("CPU Eco Mode");
+#ifdef ESP8266 // TD-er: Disable setting TX power on ESP32 as it seems to cause issues on IDF4.4
     case LabelType::WIFI_TX_MAX_PWR:        return F("Max WiFi TX Power");
     case LabelType::WIFI_CUR_TX_PWR:        return F("Current WiFi TX Power");
     case LabelType::WIFI_SENS_MARGIN:       return F("WiFi Sensitivity Margin");
     case LabelType::WIFI_SEND_AT_MAX_TX_PWR:return F("Send With Max TX Power");
+#endif
     case LabelType::WIFI_NR_EXTRA_SCANS:    return F("Extra WiFi scan loops");
     case LabelType::WIFI_USE_LAST_CONN_FROM_RTC: return F("Use Last Connected AP from RTC");
 
     case LabelType::FREE_MEM:               return F("Free RAM");
     case LabelType::FREE_STACK:             return F("Free Stack");
+#ifdef USE_SECOND_HEAP
+    case LabelType::FREE_HEAP_IRAM:         return F("Free 2nd Heap");
+#endif
+
 #if defined(CORE_POST_2_5_0) || defined(ESP32)
   #ifndef LIMIT_BUILD_SIZE
     case LabelType::HEAP_MAX_FREE_BLOCK:    return F("Heap Max Free Block");
@@ -73,18 +83,24 @@ const __FlashStringHelper * getLabel(LabelType::Enum label) {
 #ifdef ESP32
     case LabelType::HEAP_SIZE:              return F("Heap Size");
     case LabelType::HEAP_MIN_FREE:          return F("Heap Min Free");
-    #ifdef ESP32_ENABLE_PSRAM
+    #ifdef BOARD_HAS_PSRAM
     case LabelType::PSRAM_SIZE:             return F("PSRAM Size");
     case LabelType::PSRAM_FREE:             return F("PSRAM Free");
     case LabelType::PSRAM_MIN_FREE:         return F("PSRAM Min Free");
     case LabelType::PSRAM_MAX_FREE_BLOCK:   return F("PSRAM Max Free Block");
-    #endif // ESP32_ENABLE_PSRAM
+    #endif // BOARD_HAS_PSRAM
 #endif // ifdef ESP32
 
-    case LabelType::JSON_BOOL_QUOTES:       return F("JSON bool output without quotes");
-    case LabelType::ENABLE_TIMING_STATISTICS:  return F("Collect Timing Statistics");
-    case LabelType::TASKVALUESET_ALL_PLUGINS:  return F("Allow TaskValueSet on all plugins");
-    case LabelType::ENABLE_CLEAR_HUNG_I2C_BUS: return F("Try clear I2C bus when stuck");
+    case LabelType::JSON_BOOL_QUOTES:           return F("JSON bool output without quotes");
+    case LabelType::ENABLE_TIMING_STATISTICS:   return F("Collect Timing Statistics");
+    case LabelType::ENABLE_RULES_CACHING:       return F("Enable Rules Cache");
+    case LabelType::ENABLE_RULES_EVENT_REORDER: return F("Optimize Rules Cache Event Order");
+    case LabelType::TASKVALUESET_ALL_PLUGINS:   return F("Allow TaskValueSet on all plugins");
+    case LabelType::ALLOW_OTA_UNLIMITED:        return F("Allow OTA without size-check");
+    case LabelType::ENABLE_CLEAR_HUNG_I2C_BUS:  return F("Try clear I2C bus when stuck");
+#ifndef BUILD_NO_RAM_TRACKER
+    case LabelType::ENABLE_RAM_TRACKING:    return F("Enable RAM Tracker");
+#endif
 
     case LabelType::BOOT_TYPE:              return F("Last Boot Cause");
     case LabelType::BOOT_COUNT:             return F("Boot Count");
@@ -161,7 +177,10 @@ const __FlashStringHelper * getLabel(LabelType::Enum label) {
     case LabelType::ESP_BOARD_NAME:         return F("ESP Board Name");
 
     case LabelType::FLASH_CHIP_ID:          return F("Flash Chip ID");
+    case LabelType::FLASH_CHIP_VENDOR:      return F("Flash Chip Vendor");
+    case LabelType::FLASH_CHIP_MODEL:       return F("Flash Chip Model");
     case LabelType::FLASH_CHIP_REAL_SIZE:   return F("Flash Chip Real Size");
+    case LabelType::FLASH_CHIP_SPEED:       return F("Flash Chip Speed");
     case LabelType::FLASH_IDE_SIZE:         return F("Flash IDE Size");
     case LabelType::FLASH_IDE_SPEED:        return F("Flash IDE Speed");
     case LabelType::FLASH_IDE_MODE:         return F("Flash IDE Mode");
@@ -223,18 +242,25 @@ String getValue(LabelType::Enum label) {
     case LabelType::TIME_SOURCE:            return toString(node_time.timeSource);
     case LabelType::TIME_WANDER:            return String(node_time.timeWander, 3);
     case LabelType::UPTIME:                 return String(getUptimeMinutes());
-    case LabelType::LOAD_PCT:               return String(getCPUload());
+    case LabelType::LOAD_PCT:               return toString(getCPUload(), 2);
     case LabelType::LOOP_COUNT:             return String(getLoopCountPerSec());
     case LabelType::CPU_ECO_MODE:           return jsonBool(Settings.EcoPowerMode());
-    case LabelType::WIFI_TX_MAX_PWR:        return String(Settings.getWiFi_TX_power(), 2);
-    case LabelType::WIFI_CUR_TX_PWR:        return String(WiFiEventData.wifi_TX_pwr, 2);
+#ifdef ESP8266 // TD-er: Disable setting TX power on ESP32 as it seems to cause issues on IDF4.4
+    case LabelType::WIFI_TX_MAX_PWR:        return toString(Settings.getWiFi_TX_power(), 2);
+    case LabelType::WIFI_CUR_TX_PWR:        return toString(WiFiEventData.wifi_TX_pwr, 2);
     case LabelType::WIFI_SENS_MARGIN:       return String(Settings.WiFi_sensitivity_margin);
     case LabelType::WIFI_SEND_AT_MAX_TX_PWR:return jsonBool(Settings.UseMaxTXpowerForSending());
+#endif
     case LabelType::WIFI_NR_EXTRA_SCANS:    return String(Settings.NumberExtraWiFiScans);
     case LabelType::WIFI_USE_LAST_CONN_FROM_RTC: return jsonBool(Settings.UseLastWiFiFromRTC());
 
-    case LabelType::FREE_MEM:               return String(ESP.getFreeHeap());
+    case LabelType::FREE_MEM:               return String(FreeMem());
     case LabelType::FREE_STACK:             return String(getCurrentFreeStack());
+
+#ifdef USE_SECOND_HEAP
+    case LabelType::FREE_HEAP_IRAM:         return String(FreeMem2ndHeap());
+#endif
+
 #if defined(CORE_POST_2_5_0)
   #ifndef LIMIT_BUILD_SIZE
     case LabelType::HEAP_MAX_FREE_BLOCK:    return String(ESP.getMaxFreeBlockSize());
@@ -253,19 +279,26 @@ String getValue(LabelType::Enum label) {
 #ifdef ESP32
     case LabelType::HEAP_SIZE:              return String(ESP.getHeapSize());
     case LabelType::HEAP_MIN_FREE:          return String(ESP.getMinFreeHeap());
-    #ifdef ESP32_ENABLE_PSRAM
-    case LabelType::PSRAM_SIZE:             return String(ESP.getPsramSize());
-    case LabelType::PSRAM_FREE:             return String(ESP.getFreePsram());
-    case LabelType::PSRAM_MIN_FREE:         return String(ESP.getMinFreePsram());
-    case LabelType::PSRAM_MAX_FREE_BLOCK:   return String(ESP.getMaxAllocPsram());
-    #endif // ESP32_ENABLE_PSRAM
+    #ifdef BOARD_HAS_PSRAM
+    case LabelType::PSRAM_SIZE:             return String(UsePSRAM() ? ESP.getPsramSize() : 0);
+    case LabelType::PSRAM_FREE:             return String(UsePSRAM() ? ESP.getFreePsram() : 0);
+    case LabelType::PSRAM_MIN_FREE:         return String(UsePSRAM() ? ESP.getMinFreePsram() : 0);
+    case LabelType::PSRAM_MAX_FREE_BLOCK:   return String(UsePSRAM() ? ESP.getMaxAllocPsram() : 0);
+    #endif // BOARD_HAS_PSRAM
 #endif // ifdef ESP32
 
 
-    case LabelType::JSON_BOOL_QUOTES:       return jsonBool(Settings.JSONBoolWithoutQuotes());
-    case LabelType::ENABLE_TIMING_STATISTICS:  return jsonBool(Settings.EnableTimingStats());
-    case LabelType::TASKVALUESET_ALL_PLUGINS:  return jsonBool(Settings.AllowTaskValueSetAllPlugins());
-    case LabelType::ENABLE_CLEAR_HUNG_I2C_BUS: return jsonBool(Settings.EnableClearHangingI2Cbus());
+    case LabelType::JSON_BOOL_QUOTES:           return jsonBool(Settings.JSONBoolWithoutQuotes());
+    case LabelType::ENABLE_TIMING_STATISTICS:   return jsonBool(Settings.EnableTimingStats());
+    case LabelType::ENABLE_RULES_CACHING:       return jsonBool(Settings.EnableRulesCaching());
+    case LabelType::ENABLE_RULES_EVENT_REORDER: return jsonBool(Settings.EnableRulesEventReorder());
+    case LabelType::TASKVALUESET_ALL_PLUGINS:   return jsonBool(Settings.AllowTaskValueSetAllPlugins());
+    case LabelType::ALLOW_OTA_UNLIMITED:        return jsonBool(Settings.AllowOTAUnlimited());
+    case LabelType::ENABLE_CLEAR_HUNG_I2C_BUS:  return jsonBool(Settings.EnableClearHangingI2Cbus());
+#ifndef BUILD_NO_RAM_TRACKER
+    case LabelType::ENABLE_RAM_TRACKING:        return jsonBool(Settings.EnableRAMTracking());
+#endif
+
 
     case LabelType::BOOT_TYPE:              return getLastBootCauseString();
     case LabelType::BOOT_COUNT:             break;
@@ -300,10 +333,22 @@ String getValue(LabelType::Enum label) {
     case LabelType::CHANNEL:                return String(WiFi.channel());
     case LabelType::ENCRYPTION_TYPE_STA:    return // WiFi_AP_Candidates.getCurrent().encryption_type();
                                                    WiFi_encryptionType(WiFiEventData.auth_mode);
-    case LabelType::CONNECTED:              return format_msec_duration(WiFiEventData.lastConnectMoment.millisPassedSince());
+    case LabelType::CONNECTED:
+      #ifdef HAS_ETHERNET
+      if(active_network_medium == NetworkMedium_t::Ethernet) {
+        return format_msec_duration(EthEventData.lastConnectMoment.millisPassedSince());
+      }
+      #endif
+      return format_msec_duration(WiFiEventData.lastConnectMoment.millisPassedSince());
 
     // Use only the nr of seconds to fit it in an int32, plus append '000' to have msec format again.
-    case LabelType::CONNECTED_MSEC:         return String(static_cast<int32_t>(WiFiEventData.lastConnectMoment.millisPassedSince() / 1000ll)) + F("000"); 
+    case LabelType::CONNECTED_MSEC:         
+      #ifdef HAS_ETHERNET
+      if(active_network_medium == NetworkMedium_t::Ethernet) {
+        return String(static_cast<int32_t>(EthEventData.lastConnectMoment.millisPassedSince() / 1000ll)) + F("000"); 
+      }
+      #endif
+      return String(static_cast<int32_t>(WiFiEventData.lastConnectMoment.millisPassedSince() / 1000ll)) + F("000"); 
     case LabelType::LAST_DISCONNECT_REASON: return String(WiFiEventData.lastDisconnectReason);
     case LabelType::LAST_DISC_REASON_STR:   return getLastDisconnectReason();
     case LabelType::NUMBER_RECONNECTS:      return String(WiFiEventData.wifi_reconnects);
@@ -340,23 +385,36 @@ String getValue(LabelType::Enum label) {
     case LabelType::SD_LOG_LEVEL:           return getLogLevelDisplayString(Settings.SDLogLevel);
   #endif // ifdef FEATURE_SD
 
-    case LabelType::ESP_CHIP_ID:            return String(getChipId(), HEX);
+    case LabelType::ESP_CHIP_ID:            return formatToHex(getChipId());
     case LabelType::ESP_CHIP_FREQ:          return String(ESP.getCpuFreqMHz());
     case LabelType::ESP_CHIP_MODEL:         return getChipModel();
     case LabelType::ESP_CHIP_REVISION:      return String(getChipRevision());
     case LabelType::ESP_CHIP_CORES:         return String(getChipCores());
-    case LabelType::ESP_BOARD_NAME:         break;
+    case LabelType::ESP_BOARD_NAME:         
+      # ifdef ARDUINO_BOARD
+                                            return String(ARDUINO_BOARD);
+      #else
+                                            break;
+      #endif
 
-    case LabelType::FLASH_CHIP_ID:          break;
-    case LabelType::FLASH_CHIP_REAL_SIZE:   break;
+    case LabelType::FLASH_CHIP_ID:          return String(getFlashChipId());
+    case LabelType::FLASH_CHIP_VENDOR:      return formatToHex(getFlashChipId() & 0xFF);
+    case LabelType::FLASH_CHIP_MODEL:
+    {
+      const uint32_t flashChipId = getFlashChipId();
+      const uint32_t flashDevice = (flashChipId & 0xFF00) | ((flashChipId >> 16) & 0xFF);
+      return formatToHex(flashDevice);
+    }
+    case LabelType::FLASH_CHIP_REAL_SIZE:   return String(getFlashRealSizeInBytes());
+    case LabelType::FLASH_CHIP_SPEED:       return String(getFlashChipSpeed() / 1000000);
     case LabelType::FLASH_IDE_SIZE:         break;
     case LabelType::FLASH_IDE_SPEED:        break;
     case LabelType::FLASH_IDE_MODE:         break;
     case LabelType::FLASH_WRITE_COUNT:      break;
     case LabelType::SKETCH_SIZE:            break;
     case LabelType::SKETCH_FREE:            break;
-    case LabelType::FS_SIZE:                break;
-    case LabelType::FS_FREE:                break;
+    case LabelType::FS_SIZE:                return String(SpiffsTotalBytes());
+    case LabelType::FS_FREE:                return String(SpiffsFreeSpace());
     case LabelType::MAX_OTA_SKETCH_SIZE:    break;
     case LabelType::OTA_2STEP:              break;
     case LabelType::OTA_POSSIBLE:           break;
@@ -448,44 +506,4 @@ String getExtendedValue(LabelType::Enum label) {
       break;
   }
   return "";
-}
-
-String getFileName(FileType::Enum filetype) {
-  String result;
-
-  switch (filetype)
-  {
-    case FileType::CONFIG_DAT:
-      result += F("config.dat");
-      break;
-    case FileType::NOTIFICATION_DAT:
-      result += F("notification.dat");
-      break;
-    case FileType::SECURITY_DAT:
-      result += F("security.dat");
-      break;
-    case FileType::RULES_TXT:
-      // Use getRulesFileName
-      break;
-  }
-  return result;
-}
-
-String getFileName(FileType::Enum filetype, unsigned int filenr) {
-  if (filetype == FileType::RULES_TXT) {
-    return getRulesFileName(filenr);
-  }
-  return getFileName(filetype);
-}
-
-// filenr = 0...3 for files rules1.txt ... rules4.txt
-String getRulesFileName(unsigned int filenr) {
-  String result;
-
-  if (filenr < 4) {
-    result += F("rules");
-    result += filenr + 1;
-    result += F(".txt");
-  }
-  return result;
 }

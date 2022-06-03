@@ -193,12 +193,18 @@ void addTableSeparator(const String& label,
                        const String& helpButton = "");
 
 void addFormHeader(const __FlashStringHelper *header);
+void addFormHeader(const __FlashStringHelper *header,
+                   const __FlashStringHelper *helpButton);
+void addFormHeader(const __FlashStringHelper *header,
+                   const __FlashStringHelper *helpButton,
+                   const __FlashStringHelper *rtdHelpButton);
+/*                   
 void addFormHeader(const String& header,
                    const String& helpButton = "");
 void addFormHeader(const String& header,
                    const String& helpButton,
                    const String& rtdHelpButton);
-
+*/
 // ********************************************************************************
 // Add a sub header
 // ********************************************************************************
@@ -236,7 +242,7 @@ void addFloatNumberBox(const String& id,
                        float         value,
                        float         min,
                        float         max,
-                       uint8_t       nrDecimals = 6,
+                       unsigned int  nrDecimals = 6,
                        float         stepsize   = 0.0f
                        #ifdef ENABLE_TOOLTIPS
                        ,
